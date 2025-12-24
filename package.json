@@ -1,0 +1,33 @@
+{
+  "name": "vod-review",
+  "version": "1.0.0",
+  "description": "Multi-video YouTube VOD review and sync tool",
+  "main": "main.js",
+  "author": "Your Name",
+  "license": "MIT",
+  "scripts": {
+    "start": "npx electron .",
+    "build": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^30.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "dependencies": {
+    "express": "^5.2.1"
+  },
+  "build": {
+    "appId": "com.vodreview.app",
+    "productName": "VOD Review",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "icon.ico"
+    }
+  }
+}
