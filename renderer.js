@@ -27,9 +27,83 @@ let globalCursorTime = 0;
 // Behavior: clicking Load should hide settings (enter zen mode)
 const ENTER_ZEN_ON_LOAD = true;
 
+// After Load is clicked successfully, block native YouTube + HTML5 <video> keyboard shortcuts.
+// (We will add app-level shortcuts later.)
+let keybindsArmed = false;
+
+function isTypingTarget(node) {
+  if (!node) return false;
+  const elNode = node.nodeType === 1 ? node : node.parentElement;
+  if (!elNode) return false;
+
+  if (elNode.isContentEditable) return true;
+
+  const tag = (elNode.tagName || "").toUpperCase();
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+
+  const closest = elNode.closest?.("input, textarea, select, [contenteditable='true']");
+  return !!closest;
+}
+
+function isNativePlayerKey(e) {
+  // Don’t mess with OS / app shortcuts
+  if (e.ctrlKey || e.altKey || e.metaKey) return false;
+
+  const k = (e.key || "").toLowerCase();
+
+  // Space / arrows / navigation keys
+  if (
+    k === " " ||
+    k === "arrowleft" || k === "arrowright" || k === "arrowup" || k === "arrowdown" ||
+    k === "home" || k === "end" || k === "pageup" || k === "pagedown"
+  ) return true;
+
+  // 0–9 (YouTube jump)
+  if (/^[0-9]$/.test(k)) return true;
+
+  // Common YouTube keys
+  if (
+    k === "j" || k === "k" || k === "l" ||
+    k === "," || k === "." ||
+    k === "m" || k === "f" ||
+    k === "c" || k === "t" || k === "i"
+  ) return true;
+
+  // Some browsers report space via code
+  if ((e.code || "").toLowerCase() === "space") return true;
+
+  return false;
+}
+
+// Capture-phase so we beat focused elements (including <video>).
+document.addEventListener("keydown", (e) => {
+  if (!keybindsArmed) return;
+  if (isTypingTarget(e.target)) return;
+
+  if (isNativePlayerKey(e)) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+}, true);
 
 // Electron helpers (nodeIntegration is enabled)
 const { ipcRenderer, shell } = require("electron");
+
+// Custom keybinds forwarded from main process (works even when YouTube iframe has focus)
+ipcRenderer.on("app:customKeybind", (_evt, key) => {
+  if (!keybindsArmed) return;
+
+  // Don’t trigger shortcuts while typing in inputs
+  if (isTypingTarget(document.activeElement)) return;
+
+  switch (key) {
+    case "g": skipAll(-30); break;
+    case "h": skipAll(-5); break;
+    case "j": togglePlayPauseAll(); break;
+    case "k": skipAll(5); break;
+    case "l": skipAll(30); break;
+  }
+});
 
 // Where the app checks for update info (host this on GitHub Pages)
 const UPDATE_MANIFEST_URL = "https://kadengibbs.github.io/vod-review/latest.json";
@@ -711,6 +785,10 @@ function loadVideos() {
     return;
   }
 
+  // Arm native keybind blocking only after Load succeeds
+  keybindsArmed = true;
+
+
   // Start Time means: at global 0, the video should be at local "startAt".
   // Our sync math uses global = local + offset => offset must be -startAt.
   offsets = realSources.map(s => -(Number(s.startAt) || 0));
@@ -772,6 +850,7 @@ function loadVideos() {
         width: "100%",
         height: "100%",
         videoId: src.id,
+        playerVars: { disablekb: 1 },
         events: {
           onReady: () => {
             setStatus(`Loaded ${totalCount} video(s).`, false);
@@ -860,6 +939,8 @@ function loadVideos() {
     v.style.background = "black";
     v.controls = true;
     v.playsInline = true;
+    // Prevent native <video> keybinds from triggering via focus
+    v.tabIndex = -1;
 
     const url = URL.createObjectURL(src.file);
     activeObjectUrls.push(url);
@@ -1086,6 +1167,20 @@ on("zenBar", "mouseleave", () => scheduleHide());
 // Topbar
 on("loadBtn", "click", loadVideos);
 on("checkUpdateBtn", "click", checkForUpdates);
+
+// Keybinds modal open / close
+const kbModal = el("keybindsModal");
+
+const openKb = () => kbModal?.classList.add("open");
+const closeKb = () => kbModal?.classList.remove("open");
+
+on("keybindsBtn", "click", openKb);
+on("keybindsClose", "click", closeKb);
+
+// Click outside panel to close (Discord-style)
+kbModal?.addEventListener("click", (e) => {
+  if (e.target === kbModal) closeKb();
+});
 
 // Layout
 ["cols", "rows", "ratio"].forEach(id => {
