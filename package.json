@@ -3,7 +3,7 @@
   "version": "1.0.2",
   "description": "Multi-video YouTube VOD review and sync tool",
   "main": "main.js",
-  "author": "Your Name",
+  "author": "Kaden Gibbs",
   "license": "MIT",
   "scripts": {
     "start": "npx electron .",
