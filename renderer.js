@@ -86,22 +86,83 @@ document.addEventListener("keydown", (e) => {
   }
 }, true);
 
+// ----- Editable keybinds -----
+const DEFAULT_BINDS = {
+  rew30: "g",
+  rew5: "h",
+  playpause: "j",
+  fwd5: "k",
+  fwd30: "l"
+};
+
+let keybinds = loadKeybinds();
+let editingAction = null;
+
+function loadKeybinds() {
+  try {
+    const raw = localStorage.getItem("vod_keybinds");
+    if (!raw) return { ...DEFAULT_BINDS };
+    const obj = JSON.parse(raw);
+    const merged = { ...DEFAULT_BINDS, ...(obj || {}) };
+
+    // enforce uniqueness; if duplicates exist, revert duplicates back to default
+    const used = new Set();
+    for (const action of Object.keys(DEFAULT_BINDS)) {
+      let k = String(merged[action] || "").toLowerCase();
+      if (!k || used.has(k)) {
+        k = DEFAULT_BINDS[action];
+      }
+      merged[action] = k;
+      used.add(k);
+    }
+    return merged;
+  } catch {
+    return { ...DEFAULT_BINDS };
+  }
+}
+
+function saveKeybinds() {
+  localStorage.setItem("vod_keybinds", JSON.stringify(keybinds));
+  // Send to main so YouTube-focused keys still work
+  ipcRenderer.send("app:updateKeybinds", keybinds);
+}
+
+function renderKeybindsUi() {
+  const set = (id, val) => {
+    const n = el(id);
+    if (n) n.textContent = String(val || "").toUpperCase();
+  };
+  set("kb_key_rew30", keybinds.rew30);
+  set("kb_key_rew5", keybinds.rew5);
+  set("kb_key_playpause", keybinds.playpause);
+  set("kb_key_fwd5", keybinds.fwd5);
+  set("kb_key_fwd30", keybinds.fwd30);
+}
+
+function setEditing(actionOrNull) {
+  editingAction = actionOrNull;
+
+  document.querySelectorAll(".kbRow").forEach(r => {
+    r.classList.toggle("editing", r.getAttribute("data-action") === editingAction);
+  });
+}
+
 // Electron helpers (nodeIntegration is enabled)
 const { ipcRenderer, shell } = require("electron");
 
 // Custom keybinds forwarded from main process (works even when YouTube iframe has focus)
-ipcRenderer.on("app:customKeybind", (_evt, key) => {
+ipcRenderer.on("app:customKeybind", (_evt, action) => {
   if (!keybindsArmed) return;
 
   // Don’t trigger shortcuts while typing in inputs
   if (isTypingTarget(document.activeElement)) return;
 
-  switch (key) {
-    case "g": skipAll(-30); break;
-    case "h": skipAll(-5); break;
-    case "j": togglePlayPauseAll(); break;
-    case "k": skipAll(5); break;
-    case "l": skipAll(30); break;
+  switch (action) {
+    case "rew30": skipAll(-30); break;
+    case "rew5": skipAll(-5); break;
+    case "playpause": togglePlayPauseAll(); break;
+    case "fwd5": skipAll(5); break;
+    case "fwd30": skipAll(30); break;
   }
 });
 
@@ -1171,7 +1232,11 @@ on("checkUpdateBtn", "click", checkForUpdates);
 // Keybinds modal open / close
 const kbModal = el("keybindsModal");
 
-const openKb = () => kbModal?.classList.add("open");
+const openKb = () => {
+  renderKeybindsUi();
+  kbModal?.classList.add("open");
+};
+
 const closeKb = () => kbModal?.classList.remove("open");
 
 on("keybindsBtn", "click", openKb);
@@ -1181,6 +1246,54 @@ on("keybindsClose", "click", closeKb);
 kbModal?.addEventListener("click", (e) => {
   if (e.target === kbModal) closeKb();
 });
+
+// Populate UI + send binds to main on startup
+renderKeybindsUi();
+saveKeybinds(); // sends to main
+
+// Edit buttons
+document.querySelectorAll(".kbEdit").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const action = btn.getAttribute("data-action");
+    if (!action) return;
+    setEditing(action);
+  });
+});
+
+// Capture the next key press when editing
+window.addEventListener("keydown", (e) => {
+  if (!editingAction) return;
+
+  // ESC cancels edit
+  if (e.key === "Escape") {
+    e.preventDefault();
+    setEditing(null);
+    return;
+  }
+
+  // Ignore modifier combos
+  if (e.ctrlKey || e.altKey || e.metaKey) return;
+
+  const pressed = String(e.key || "").toLowerCase();
+
+  // Ignore pure modifiers
+  if (pressed === "shift" || pressed === "control" || pressed === "alt" || pressed === "meta") return;
+
+  // Don’t allow binding to a key already used
+  const alreadyUsedBy = Object.entries(keybinds).find(([act, k]) => act !== editingAction && k === pressed);
+  if (alreadyUsedBy) {
+    e.preventDefault();
+    // keep editing active; do nothing
+    return;
+  }
+
+  e.preventDefault();
+
+  keybinds[editingAction] = pressed;
+  renderKeybindsUi();
+  saveKeybinds();
+  setEditing(null);
+}, true);
 
 // Layout
 ["cols", "rows", "ratio"].forEach(id => {

@@ -316,10 +316,11 @@
 
     .kbRow {
       display: grid;
-      grid-template-columns: 90px 140px;
+      grid-template-columns: 90px 170px 120px;
       gap: 18px;
       align-items: center;
     }
+
 
     .kbKey, .kbAction {
       background: #2c2c2c;
@@ -331,6 +332,29 @@
       justify-content: center;
       color: #fff;
     }
+
+    .kbEdit {
+      background: #2c2c2c;
+      border: 1px solid #1f1f1f;
+      border-radius: 12px;
+      height: 64px;
+      color: #fff;
+      font-size: 28px;
+      font-weight: 500;
+    }
+
+    .kbRow.editing .kbEdit {
+      opacity: 0.85;
+    }
+
+    .kbRow.editing .kbKey {
+      outline: 2px solid rgba(255,255,255,0.35);
+    }
+
+    .kbEdit:active {
+      transform: translateY(1px);
+    }
+
 
     .kbKey {
       font-size: 28px;
@@ -439,11 +463,35 @@
       <button id="keybindsClose" class="modalClose" aria-label="Close">×</button>
 
       <div class="kbGrid">
-        <div class="kbRow"><div class="kbKey">G</div><div class="kbAction">-30s</div></div>
-        <div class="kbRow"><div class="kbKey">H</div><div class="kbAction">-5s</div></div>
-        <div class="kbRow"><div class="kbKey">J</div><div class="kbAction">Pause /<br>Play</div></div>
-        <div class="kbRow"><div class="kbKey">K</div><div class="kbAction">+5s</div></div>
-        <div class="kbRow"><div class="kbKey">L</div><div class="kbAction">+30s</div></div>
+        <div class="kbRow" data-action="rew30">
+          <div class="kbKey" id="kb_key_rew30">G</div>
+          <div class="kbAction">-30s</div>
+          <button class="kbEdit" data-action="rew30">Edit</button>
+        </div>
+
+        <div class="kbRow" data-action="rew5">
+          <div class="kbKey" id="kb_key_rew5">H</div>
+          <div class="kbAction">-5s</div>
+          <button class="kbEdit" data-action="rew5">Edit</button>
+        </div>
+
+        <div class="kbRow" data-action="playpause">
+          <div class="kbKey" id="kb_key_playpause">J</div>
+          <div class="kbAction">Pause / Play</div>
+          <button class="kbEdit" data-action="playpause">Edit</button>
+        </div>
+
+        <div class="kbRow" data-action="fwd5">
+          <div class="kbKey" id="kb_key_fwd5">K</div>
+          <div class="kbAction">+5s</div>
+          <button class="kbEdit" data-action="fwd5">Edit</button>
+        </div>
+
+        <div class="kbRow" data-action="fwd30">
+          <div class="kbKey" id="kb_key_fwd30">L</div>
+          <div class="kbAction">+30s</div>
+          <button class="kbEdit" data-action="fwd30">Edit</button>
+        </div>
       </div>
     </div>
   </div>

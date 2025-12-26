@@ -10,6 +10,9 @@ ipcMain.handle("getVersion", () => app.getVersion());
 
 let serverHandle = null;
 
+// Dynamic keybinds (key -> action)
+let keyToAction = {};
+
 async function createWindow() {
   // Start local server so YouTube sees an http(s) origin instead of file://
   serverHandle = await startServer(3000);
@@ -30,14 +33,30 @@ async function createWindow() {
     if (input.control || input.alt || input.meta) return;
 
     const key = String(input.key || "").toLowerCase();
-    if (!["g", "h", "j", "k", "l"].includes(key)) return;
+    const action = keyToAction[key];
+    if (!action) return;
 
     // Prevent YouTube / HTML5 players from handling it
     event.preventDefault();
 
     // Forward to renderer
-    win.webContents.send("app:customKeybind", key);
+    win.webContents.send("app:customKeybind", action);
   });
+
+    // Renderer sends updated binds: { rew30:'g', rew5:'h', playpause:'j', fwd5:'k', fwd30:'l' }
+  ipcMain.on("app:updateKeybinds", (_evt, binds) => {
+    const next = {};
+    if (binds && typeof binds === "object") {
+      for (const [action, key] of Object.entries(binds)) {
+        const k = String(key || "").toLowerCase();
+        if (!k) continue;
+        // Only one action per key
+        if (!next[k]) next[k] = action;
+      }
+    }
+    keyToAction = next;
+  });
+
 }
 
 app.whenReady().then(createWindow);
