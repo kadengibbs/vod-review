@@ -198,6 +198,7 @@
     /* --- grid --- */
     .grid {
       flex: 1 1 auto;
+      height: 100%;
       display: grid;
       grid-template-columns: repeat(var(--cols), 1fr);
       grid-template-rows: repeat(var(--rows), 1fr);
@@ -226,6 +227,26 @@
     body.zen .topbar,
     body.zen .setupPane {
       display: none;
+    }
+
+    /* When user exits Zen to open Settings (after videos were loaded),
+      hide the video grid so ONLY the settings page is visible. */
+    body.hasLoaded:not(.zen) #grid {
+      display: none;
+    }
+
+    /* Height reserved for zen controller when Autohide is OFF */
+    :root { --zenBarH: 0px; }
+
+    /* If Autohide is unchecked, reserve space so the bar doesn't cover videos */
+    body.zen.zenPinned .app {
+      padding-bottom: var(--zenBarH);
+      box-sizing: border-box;
+    }
+
+    /* Ensure grid actually shrinks so zen bar never overlaps */
+    body.zen.zenPinned #grid {
+      max-height: calc(100vh - var(--zenBarH));
     }
 
     .zenBar {

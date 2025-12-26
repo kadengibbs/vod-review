@@ -504,6 +504,18 @@ function setAutoHide(enabled) {
     bar.classList.remove("autohideHidden");
     clearTimeout(hideTimer);
   }
+
+  // If Autohide is OFF in Zen, reserve space so the bar doesn't cover the bottom row
+  document.body.classList.toggle(
+    "zenPinned",
+    document.body.classList.contains("zen") && !autoHideEnabled
+  );
+
+  updateZenBarSpace();
+  setTimeout(() => {
+    updateTileHeight();
+    updateSafeArea();
+  }, 0);
 }
 
 function scheduleHide() {
@@ -525,11 +537,13 @@ function showBarNow() {
 
 function showZenBar(show) {
   el("zenBar")?.classList.toggle("show", !!show);
+  updateZenBarSpace();
 }
 
 function setZenMode(onMode) {
   document.body.classList.toggle("zen", !!onMode);
   showZenBar(!!onMode && players.length > 0);
+  updateZenBarSpace();
 
   setTimeout(() => {
     setAutoHide(el("autoHideToggle")?.checked ?? true);
@@ -543,8 +557,15 @@ function toggleZenMode() {
   setZenMode(!document.body.classList.contains("zen"));
 }
 
-/* ---------- Layout sizing ---------- */
+function updateZenBarSpace() {
+  const bar = el("zenBar");
+  if (!bar) return;
 
+  const h = Math.ceil(bar.getBoundingClientRect().height || 0);
+  document.documentElement.style.setProperty("--zenBarH", `${h}px`);
+}
+
+/* ---------- Layout sizing ---------- */
 function updateTileHeight() {
   const grid = el("grid");
   const rowsInput = el("rows");
@@ -913,12 +934,29 @@ function loadVideos() {
         width: "100%",
         height: "100%",
         videoId: src.id,
-        playerVars: { disablekb: 1 },
+          playerVars: {
+            disablekb: 1,        // no YouTube keyboard shortcuts
+            controls: 0,         // hide controls
+            fs: 0,               // disable fullscreen
+            rel: 0,              // reduce related videos
+            modestbranding: 1,   // remove branding
+            iv_load_policy: 3,   // hide annotations
+            playsinline: 1,
+            showinfo: 0,         // hide title / channel info (legacy but still effective)
+            enablejsapi: 1,
+            origin: "http://127.0.0.1"
+          },
         events: {
           onReady: () => {
             setStatus(`Loaded ${totalCount} video(s).`, false);
+
+            // Hard-disable any mouse interaction with the injected YouTube <iframe>
+            const frame = holder.querySelector("iframe");
+            if (frame) frame.style.pointerEvents = "none";
+
             afterAnyReady();
           },
+
           onStateChange: e => {
             const srcYt = e.target;
             const srcIdx = players.findIndex(p => p.__type === "yt" && p.__yt === srcYt);
@@ -1000,10 +1038,18 @@ function loadVideos() {
     v.style.width = "100%";
     v.style.height = "100%";
     v.style.background = "black";
-    v.controls = true;
+    // No native HTML5 video UI (we control playback via the app)
+    v.controls = false;
     v.playsInline = true;
+
+    // Extra hardening: remove extra built-in menus/features when supported
+    v.setAttribute("controlslist", "nodownload noremoteplayback noplaybackrate");
+    v.disablePictureInPicture = true;
+    v.disableRemotePlayback = true;
     // Prevent native <video> keybinds from triggering via focus
     v.tabIndex = -1;
+    
+    v.addEventListener("contextmenu", (e) => e.preventDefault());
 
     const url = URL.createObjectURL(src.file);
     activeObjectUrls.push(url);
@@ -1126,6 +1172,7 @@ function loadVideos() {
   // ✅ Hide all settings after Load (like before)
   if (ENTER_ZEN_ON_LOAD) {
     setZenMode(true);
+    document.body.classList.add("hasLoaded");
     showBarNow();
   }
 }
