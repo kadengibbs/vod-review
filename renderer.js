@@ -13,6 +13,7 @@ let driftTimer = null;
 let uiTimer = null;
 let isSeeking = false;
 let isZenSeeking = false;
+let lastZenHoverV = null; // stores the exact range value we computed from mouse position
 
 // End-handling
 let endedFlags = []; // per video: true once it reaches end (until global time goes back before end)
@@ -257,7 +258,7 @@ function shouldParticipate(i, globalTarget) {
   const endGlobal = (d + getOffset(i));
   if (endedFlags[i]) {
     // If global target is before its end, we can rejoin
-    if (globalTarget <= endGlobal - END_EPS) return true;
+    if (globalTarget < endGlobal - END_EPS) return true;
     return false;
   }
   return true;
@@ -320,12 +321,13 @@ function getGlobalTimes(globalTarget = null) {
 }
 
 function getMedianGlobalTime() {
-  const times = getGlobalTimes(null);
+  // Use current cursor as the participation target so "ended" videos don't pull the median backward
+  const times = getGlobalTimes(globalCursorTime);
   return times.length ? median(times) : globalCursorTime;
 }
 
-function refreshGlobalCursorFromActive() {
-  const times = getGlobalTimes(null);
+function refreshGlobalCursorFromActive(globalTarget = null) {
+  const times = getGlobalTimes(globalTarget);
   if (times.length) globalCursorTime = median(times);
 }
 
@@ -414,7 +416,7 @@ function seekAllToGlobal(globalT, lockoutMs = 650) {
   }
 
   setTimeout(() => {
-    refreshGlobalCursorFromActive();
+    refreshGlobalCursorFromActive(globalCursorTime);
     updateUiTime();
   }, 120);
 }
@@ -1344,8 +1346,60 @@ on("zSettings", "click", () => {
   toggleZenMode();
 });
 
+function hideZenHover() {
+  lastZenHoverV = null;
+  const tip = el("zenHoverTime");
+  if (!tip) return;
+  tip.classList.remove("show");
+}
+
+function updateZenHoverFromMouseEvent(e) {
+  const zb = el("zenSeek");
+  const wrap = el("zenSeekWrap");
+  const tip = el("zenHoverTime");
+  if (!zb || !wrap || !tip) return;
+
+  const dGlobal = getMaxGlobalEnd();
+  if (!Number.isFinite(dGlobal) || dGlobal <= 0) {
+    lastZenHoverV = null;
+    hideZenHover();
+    return;
+  }
+
+  // IMPORTANT: compute the same value the range would end up with on click
+  const rect = zb.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const pct = rect.width > 0 ? Math.max(0, Math.min(1, x / rect.width)) : 0;
+
+  const min = Number.isFinite(+zb.min) ? +zb.min : 0;
+  const max = Number.isFinite(+zb.max) ? +zb.max : 1000;
+  const step = (zb.step && zb.step !== "any" && Number.isFinite(+zb.step) && +zb.step > 0) ? +zb.step : 1;
+
+  const raw = min + pct * (max - min);
+  let v = Math.round(raw / step) * step;
+  v = Math.max(min, Math.min(max, v));
+  lastZenHoverV = v;
+  const g = (v / 1000) * dGlobal;
+  tip.textContent = formatTime(g);
+  tip.classList.add("show");
+
+  // Position centered above cursor, clamped so it never goes off-screen
+  const wrapRect = wrap.getBoundingClientRect();
+  const cursorLeft = e.clientX - wrapRect.left;
+
+  // measure after text set
+  const tipW = tip.offsetWidth || 0;
+  const half = tipW / 2;
+
+  const clampedLeft = Math.max(half, Math.min(wrapRect.width - half, cursorLeft));
+  tip.style.left = `${clampedLeft}px`;
+}
+
 // Zen timeline
 on("zenSeek", "input", () => { isZenSeeking = true; showBarNow(); });
+on("zenSeek", "mousemove", updateZenHoverFromMouseEvent);
+on("zenSeek", "mousedown", updateZenHoverFromMouseEvent);
+on("zenSeek", "mouseleave", hideZenHover);
 on("zenSeek", "change", () => {
   const dGlobal = getMaxGlobalEnd();
   if (!Number.isFinite(dGlobal) || dGlobal <= 0) {
@@ -1354,7 +1408,8 @@ on("zenSeek", "change", () => {
   }
 
   const zb = el("zenSeek");
-  const g = ((zb?.value || 0) / 1000) * dGlobal;
+  const v = (lastZenHoverV != null ? lastZenHoverV : +(zb?.value || 0));
+  const g = (v / 1000) * dGlobal;
 
   const wasPlaying = anyPlaying();
   seekAllToGlobal(g, 750);
