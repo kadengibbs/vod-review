@@ -1189,11 +1189,29 @@ async function checkForUpdates() {
 
     const ok = window.confirm(msg);
     if (ok) {
-      shell.openExternal(downloadUrl);
-      setStatus(`Opening download for v${latestVersion}.`);
+      setStatus(`Downloading v${latestVersion}…`);
+
+      // Download inside app (to Downloads)
+      const { filePath } = await ipcRenderer.invoke("update:downloadInstaller", {
+        url: downloadUrl,
+        version: latestVersion
+      });
+
+      setStatus(`Downloaded v${latestVersion}. Ready to install.`);
+
+      const installNow = window.confirm(
+        `Downloaded v${latestVersion}.\n\nInstall now?\n\n(Your current version will close so the installer can run.)`
+      );
+
+      if (installNow) {
+        // Launch installer, then quit app so install isn't blocked
+        await ipcRenderer.invoke("update:installAndQuit", { filePath });
+        // No further UI needed; app will quit
+      }
     } else {
       setStatus(`Update available (v${latestVersion}).`);
     }
+
   } catch (err) {
     setStatus(`Update check failed: ${err?.message || err}`, true);
   }

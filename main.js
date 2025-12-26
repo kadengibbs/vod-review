@@ -1,4 +1,8 @@
 const { app, BrowserWindow, ipcMain } = require("electron");
+const fs = require("fs");
+const https = require("https");
+const { URL } = require("url");
+const { spawn } = require("child_process");
 const path = require("path");
 const { startServer } = require("./server");
 
@@ -7,6 +11,89 @@ ipcMain.handle("app:getVersion", () => app.getVersion());
 
 // Alias handler (fixes: "No handler registered for 'getVersion'")
 ipcMain.handle("getVersion", () => app.getVersion());
+function sanitizeFilename(name) {
+  return String(name || "installer.exe").replace(/[<>:"/\\|?*\x00-\x1F]/g, "_");
+}
+
+function guessFilenameFromUrl(urlStr) {
+  try {
+    const u = new URL(urlStr);
+    const last = (u.pathname.split("/").pop() || "").trim();
+    return sanitizeFilename(last || "installer.exe");
+  } catch {
+    return "installer.exe";
+  }
+}
+
+function downloadHttpsToFile(urlStr, destPath, maxRedirects = 5) {
+  return new Promise((resolve, reject) => {
+    const doReq = (uStr, redirectsLeft) => {
+      const req = https.get(uStr, { headers: { "User-Agent": "VOD-Review-Updater" } }, (res) => {
+        // Redirect handling
+        if (res.statusCode && [301, 302, 303, 307, 308].includes(res.statusCode)) {
+          const loc = res.headers.location;
+          if (!loc) return reject(new Error("Redirect without location header."));
+          if (redirectsLeft <= 0) return reject(new Error("Too many redirects."));
+          const nextUrl = new URL(loc, uStr).toString();
+          res.resume();
+          return doReq(nextUrl, redirectsLeft - 1);
+        }
+
+        if (res.statusCode !== 200) {
+          res.resume();
+          return reject(new Error(`Download failed (HTTP ${res.statusCode}).`));
+        }
+
+        const file = fs.createWriteStream(destPath);
+        res.pipe(file);
+
+        file.on("finish", () => file.close(() => resolve(destPath)));
+        file.on("error", (err) => {
+          try { fs.unlinkSync(destPath); } catch {}
+          reject(err);
+        });
+      });
+
+      req.on("error", reject);
+    };
+
+    doReq(urlStr, maxRedirects);
+  });
+}
+
+// Download installer to Downloads folder
+ipcMain.handle("update:downloadInstaller", async (_event, { url, version } = {}) => {
+  const downloadUrl = String(url || "").trim();
+  if (!downloadUrl) throw new Error("Missing download URL.");
+
+  const downloadsDir = app.getPath("downloads");
+  const filenameFromUrl = guessFilenameFromUrl(downloadUrl);
+
+  // Prefer a versioned filename if we can
+  const v = String(version || "").trim();
+  const preferred = v ? sanitizeFilename(`VOD.Review.Setup.${v}.exe`) : filenameFromUrl;
+  const targetPath = path.join(downloadsDir, preferred);
+
+  // Ensure we can overwrite
+  try { fs.unlinkSync(targetPath); } catch {}
+
+  await downloadHttpsToFile(downloadUrl, targetPath);
+  return { filePath: targetPath };
+});
+
+// Launch installer, then quit current app
+ipcMain.handle("update:installAndQuit", async (_event, { filePath } = {}) => {
+  const exePath = String(filePath || "").trim();
+  if (!exePath) throw new Error("Missing installer path.");
+  if (!fs.existsSync(exePath)) throw new Error("Installer file not found.");
+
+  // Launch installer normally (UI)
+  spawn(exePath, [], { detached: true, stdio: "ignore" }).unref();
+
+  // Quit current app so installer isn't blocked by running process
+  app.quit();
+  return { ok: true };
+});
 
 let serverHandle = null;
 
