@@ -1,5 +1,5 @@
 {
-  "version": "1.0.3",
-  "url": "https://github.com/kadengibbs/vod-review/releases/download/v1.0.3/VOD.Review.Setup.1.0.3.exe",
-  "notes": "Editable keybinds + keybinds settings window"
+  "version": "1.0.4",
+  "url": "https://github.com/kadengibbs/vod-review/releases/download/v1.0.4/VOD.Review.Setup.1.0.4.exe",
+  "notes": "Updater downloads the installer in-app and closes the app before launching the installer."
 }
