@@ -42,11 +42,29 @@ function isTypingTarget(node) {
 
   if (elNode.isContentEditable) return true;
 
-  const tag = (elNode.tagName || "").toUpperCase();
-  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  // Check if it's a form element that requires typing
+  const checkInput = (el) => {
+    const tTag = (el.tagName || "").toUpperCase();
+    if (tTag === "TEXTAREA" || tTag === "SELECT") return true;
+    if (tTag === "INPUT") {
+      const type = (el.type || "").toLowerCase();
+      // Allow keybinds for these types
+      if (["range", "checkbox", "radio", "button", "submit", "reset", "file", "color", "image"].includes(type)) {
+        return false;
+      }
+      return true;
+    }
+    return false;
+  };
 
+  // Check the element itself
+  if (checkInput(elNode)) return true;
+
+  // Check ancestry
   const closest = elNode.closest?.("input, textarea, select, [contenteditable='true']");
-  return !!closest;
+  if (closest && checkInput(closest)) return true;
+
+  return false;
 }
 
 function isNativePlayerKey(e) {
@@ -89,6 +107,20 @@ document.addEventListener("keydown", (e) => {
     e.stopPropagation();
   }
 }, true);
+
+// Global typing detection to tell main process to STOP stealing keys found in inputs
+document.addEventListener("focusin", (e) => {
+  const isTy = isTypingTarget(e.target);
+  ipcRenderer.send("app:setTyping", isTy);
+}, true);
+
+document.addEventListener("focusout", () => {
+  // Wait a tick to see where focus went (if anywhere)
+  setTimeout(() => {
+    const isTy = isTypingTarget(document.activeElement);
+    ipcRenderer.send("app:setTyping", isTy);
+  }, 10);
+});
 
 // ----- Editable keybinds -----
 const DEFAULT_BINDS = {
@@ -391,6 +423,12 @@ function toggleMuteSelectMode() {
       delete card.dataset.muteClickable;
     }
   });
+
+  // Disable/Enable volume sliders
+  const sliders = document.querySelectorAll(".volSlider");
+  sliders.forEach(s => {
+    s.disabled = muteSelectMode;
+  });
 }
 
 function toggleMuteForPlayer(playerIndex) {
@@ -419,6 +457,40 @@ function toggleMuteForPlayer(playerIndex) {
   }
 
   card.classList.toggle("muted", !isMuted);
+
+  // Sync slider
+  const slider = card.querySelector(".volSlider");
+  if (slider) {
+    if (isMuted) {
+      // We just became UNMUTED (was muted)
+      let vol = 100;
+      try { vol = p.getVolume(); } catch { }
+      // If vol is 0 for some reason (maybe it was set to 0), default to 100?
+      if (vol === 0) vol = 100;
+      slider.value = vol;
+    } else {
+      // We just became MUTED (was unmuted)
+      slider.value = 0;
+    }
+    // Update fill
+    const val = (slider.value - slider.min) / (slider.max - slider.min) * 100;
+    slider.style.background = `linear-gradient(to right, #eee ${val}%, #444 ${val}%)`;
+
+    // Update Icon
+    const icon = card.querySelector(".volIcon");
+    if (icon) {
+      const PATH_MUTE = 'M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73 4.27 3zM12 4L9.91 6.09 12 8.18V4z';
+      const PATH_LOW = 'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z';
+      const PATH_HIGH = 'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z';
+
+      let path = PATH_MUTE;
+      const v = +slider.value;
+      if (v > 50) path = PATH_HIGH;
+      else if (v > 0) path = PATH_LOW;
+
+      icon.innerHTML = `<path d="${path}"/>`;
+    }
+  }
 }
 
 // Global click handler for mute selection mode (capture phase to intercept before video handlers)
@@ -705,8 +777,14 @@ function makeYtAdapter(ytPlayer) {
     seekTo: (t, allowSeekAhead) => ytPlayer.seekTo(t, allowSeekAhead),
     playVideo: () => ytPlayer.playVideo(),
     pauseVideo: () => ytPlayer.pauseVideo(),
+    pauseVideo: () => ytPlayer.pauseVideo(),
     setPlaybackRate: (v) => ytPlayer.setPlaybackRate(v),
-    getPlayerState: () => ytPlayer.getPlayerState()
+    getPlayerState: () => ytPlayer.getPlayerState(),
+    setVolume: (v) => ytPlayer.setVolume(v),
+    getVolume: () => ytPlayer.getVolume(),
+    unMute: () => ytPlayer.unMute(),
+    mute: () => ytPlayer.mute(),
+    isMuted: () => ytPlayer.isMuted()
   };
 }
 
@@ -721,7 +799,12 @@ function makeFileAdapter(videoEl, cleanup) {
     playVideo: () => { const p = videoEl.play(); if (p?.catch) p.catch(() => { }); },
     pauseVideo: () => videoEl.pause(),
     setPlaybackRate: (v) => { videoEl.playbackRate = Number(v) || 1; },
-    getPlayerState: () => (videoEl.paused ? 2 : 1)
+    getPlayerState: () => (videoEl.paused ? 2 : 1),
+    setVolume: (v) => { videoEl.volume = Math.max(0, Math.min(100, v)) / 100; videoEl.muted = (v === 0); },
+    getVolume: () => (videoEl.muted ? 0 : videoEl.volume * 100),
+    unMute: () => { videoEl.muted = false; },
+    mute: () => { videoEl.muted = true; },
+    isMuted: () => videoEl.muted
   };
 }
 
@@ -812,6 +895,14 @@ function ensureVideoRow(idx) {
   st.autocomplete = "off";
   row.appendChild(st);
 
+  // Video Name
+  const vn = document.createElement("input");
+  vn.type = "text";
+  vn.className = "videoNameInput";
+  vn.placeholder = "Video Name";
+  vn.autocomplete = "off";
+  row.appendChild(vn);
+
   block.appendChild(row);
 
   // Events: if user types a YT link, clear file
@@ -885,17 +976,19 @@ function collectSourcesFromUI() {
     const urlEl = block.querySelector(".videoUrl");
     const fileEl = block.querySelector(".videoFile");
     const stEl = block.querySelector(".startTime");
+    const vnEl = block.querySelector(".videoNameInput");
 
     const f = fileEl?.files?.[0] || null;
     const rawUrl = (urlEl?.value || "").trim();
     const startAt = parseStartTimeToSeconds(stEl?.value || "");
+    const name = (vnEl?.value || "").trim();
 
     if (f) {
-      sources.push({ type: "file", file: f, startAt });
+      sources.push({ type: "file", file: f, startAt, name });
     } else if (rawUrl) {
       const id = extractId(rawUrl);
-      if (id) sources.push({ type: "yt", id, startAt });
-      else sources.push({ type: "bad", raw: rawUrl, startAt });
+      if (id) sources.push({ type: "yt", id, startAt, name });
+      else sources.push({ type: "bad", raw: rawUrl, startAt, name });
     }
   }
 
@@ -943,7 +1036,7 @@ function loadVideos() {
 
   // Arm native keybind blocking only after Load succeeds
   keybindsArmed = true;
-
+  ipcRenderer.send("app:setKeybindsArmed", true);
 
   // Start Time means: at global 0, the video should be at local "startAt".
   // Our sync math uses global = local + offset => offset must be -startAt.
@@ -962,6 +1055,86 @@ function loadVideos() {
   for (let i = 0; i < totalCount; i++) {
     const card = document.createElement("div");
     card.className = "card";
+
+    // Video Name Header
+    const src = realSources[i];
+    const nameStr = src.name || "";
+    const header = document.createElement("div");
+    header.className = "videoHeader";
+
+    const nameSpan = document.createElement("span");
+    nameSpan.className = "videoNameText";
+    nameSpan.textContent = nameStr;
+    header.appendChild(nameSpan);
+
+    // Volume Slider
+    const volWrap = document.createElement("div");
+    volWrap.className = "volControl";
+
+    // Icon
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.setAttribute("viewBox", "0 0 24 24");
+    icon.setAttribute("class", "volIcon");
+
+    // SVG Paths
+    const PATH_MUTE = 'M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73 4.27 3zM12 4L9.91 6.09 12 8.18V4z';
+    const PATH_LOW = 'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z';
+    const PATH_HIGH = 'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z';
+
+    const updateIcon = (val) => {
+      let path = PATH_MUTE;
+      if (val > 50) path = PATH_HIGH;
+      else if (val > 0) path = PATH_LOW;
+      icon.innerHTML = `<path d="${path}"/>`;
+    };
+    // Initialize default (mute)
+    updateIcon(0);
+
+    // Toggle mute on icon click
+    icon.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleMuteForPlayer(i);
+    });
+    // Stop propagation for mousedown too just in case
+    icon.addEventListener("mousedown", (e) => e.stopPropagation());
+
+    volWrap.appendChild(icon);
+
+    const range = document.createElement("input");
+    range.type = "range";
+    range.className = "volSlider";
+    range.min = 0;
+    range.max = 100;
+    range.value = 0; // Default mute
+
+    const updateSliderFill = (input) => {
+      const val = (input.value - input.min) / (input.max - input.min) * 100;
+      input.style.background = `linear-gradient(to right, #eee ${val}%, #444 ${val}%)`;
+    };
+    updateSliderFill(range);
+
+    range.addEventListener("input", (e) => {
+      updateSliderFill(e.target);
+      const v = +e.target.value;
+      updateIcon(v);
+      const p = players[i];
+      if (p) {
+        if (v > 0) p.unMute();
+        else p.mute();
+        p.setVolume(v);
+      }
+      // Update mute class on card
+      const c = document.querySelectorAll("#grid .card")[i];
+      if (c) c.classList.toggle("muted", v === 0);
+    });
+    // Stop propagation so seeking volume doesn't trigger card clicks/drag
+    range.addEventListener("click", e => e.stopPropagation());
+    range.addEventListener("mousedown", e => e.stopPropagation());
+
+    volWrap.appendChild(range);
+    header.appendChild(volWrap);
+
+    card.appendChild(header);
 
     const wrap = document.createElement("div");
     wrap.className = "playerWrap r16x9";
@@ -1175,6 +1348,9 @@ function loadVideos() {
     };
 
     const onPause = () => {
+      // If pause is due to end, don't broadcast global pause
+      if (v.ended) return;
+
       if (syncing || inLockout()) return;
       beginLockout(450);
       for (let k = 0; k < players.length; k++) {

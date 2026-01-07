@@ -49,7 +49,7 @@ function downloadHttpsToFile(urlStr, destPath, maxRedirects = 5) {
 
         file.on("finish", () => file.close(() => resolve(destPath)));
         file.on("error", (err) => {
-          try { fs.unlinkSync(destPath); } catch {}
+          try { fs.unlinkSync(destPath); } catch { }
           reject(err);
         });
       });
@@ -75,7 +75,7 @@ ipcMain.handle("update:downloadInstaller", async (_event, { url, version } = {})
   const targetPath = path.join(downloadsDir, preferred);
 
   // Ensure we can overwrite
-  try { fs.unlinkSync(targetPath); } catch {}
+  try { fs.unlinkSync(targetPath); } catch { }
 
   await downloadHttpsToFile(downloadUrl, targetPath);
   return { filePath: targetPath };
@@ -98,7 +98,10 @@ ipcMain.handle("update:installAndQuit", async (_event, { filePath } = {}) => {
 let serverHandle = null;
 
 // Dynamic keybinds (key -> action)
+// Dynamic keybinds (key -> action)
 let keyToAction = {};
+let keybindsArmed = false;
+let isTyping = false;
 
 async function createWindow() {
   // Start local server so YouTube sees an http(s) origin instead of file://
@@ -114,10 +117,16 @@ async function createWindow() {
   });
 
   win.loadURL(`http://127.0.0.1:${serverHandle.port}/index.html`);
-    // Custom keybinds: capture at the webContents level so it works even when a YouTube iframe is focused
+  // Custom keybinds: capture at the webContents level so it works even when a YouTube iframe is focused
   win.webContents.on("before-input-event", (event, input) => {
     if (input.type !== "keyDown") return;
     if (input.control || input.alt || input.meta) return;
+
+    // 1. If logic not armed, let it pass (standard typing)
+    if (!keybindsArmed) return;
+
+    // 2. If user is typing in an input, let it pass
+    if (isTyping) return;
 
     const key = String(input.key || "").toLowerCase();
     const action = keyToAction[key];
@@ -130,20 +139,26 @@ async function createWindow() {
     win.webContents.send("app:customKeybind", action);
   });
 
-    // Renderer sends updated binds: { rew30:'g', rew5:'h', playpause:'j', fwd5:'k', fwd30:'l' }
+  // Renderer sends updated binds
   ipcMain.on("app:updateKeybinds", (_evt, binds) => {
     const next = {};
     if (binds && typeof binds === "object") {
       for (const [action, key] of Object.entries(binds)) {
         const k = String(key || "").toLowerCase();
         if (!k) continue;
-        // Only one action per key
         if (!next[k]) next[k] = action;
       }
     }
     keyToAction = next;
   });
 
+  ipcMain.on("app:setKeybindsArmed", (_evt, val) => {
+    keybindsArmed = !!val;
+  });
+
+  ipcMain.on("app:setTyping", (_evt, val) => {
+    isTyping = !!val;
+  });
 }
 
 app.whenReady().then(createWindow);
