@@ -1,5 +1,6 @@
 <!doctype html>
 <html>
+
 <head>
   <meta charset="UTF-8" />
   <title>VOD Review</title>
@@ -36,7 +37,9 @@
       overflow: hidden;
     }
 
-    input, select, button {
+    input,
+    select,
+    button {
       background: #111;
       color: #eee;
       border: 1px solid var(--border);
@@ -44,7 +47,9 @@
       font-size: 14px;
     }
 
-    button { cursor: pointer; }
+    button {
+      cursor: pointer;
+    }
 
     .meta {
       font-size: 11px;
@@ -83,17 +88,18 @@
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      background: #1b1b1b;
+      background: #111;
       border: 1px solid var(--border);
       border-radius: 12px;
       padding: 0 12px;
+      font-size: 14px;
     }
 
     .chip label {
       height: 100%;
       display: inline-flex;
       align-items: center;
-      gap: 8px;
+      gap: 5px;
       cursor: pointer;
       user-select: none;
       margin: 0;
@@ -101,9 +107,25 @@
 
     .chip input[type="number"] {
       height: var(--controlInnerH);
-      width: 72px;
-      padding: 0 8px;
-      border-radius: 10px;
+      width: 36px;
+      padding: 0 4px;
+      border: none;
+      background: transparent;
+      text-align: center;
+      -moz-appearance: textfield;
+      appearance: textfield;
+    }
+
+    /* Make integer inputs narrower */
+    #rows,
+    #cols {
+      width: 20px;
+    }
+
+    .chip input[type="number"]::-webkit-outer-spin-button,
+    .chip input[type="number"]::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
     }
 
     .chip select {
@@ -113,8 +135,8 @@
     }
 
     .chip input[type="checkbox"] {
-      width: 16px;
-      height: 16px;
+      width: 13.5px;
+      height: 13.5px;
     }
 
     .status {
@@ -128,7 +150,9 @@
       height: var(--controlH);
     }
 
-    .status.error { color: #ff6666; }
+    .status.error {
+      color: #ff6666;
+    }
 
     /* --- video list --- */
     .setupPane {
@@ -220,8 +244,42 @@
       position: relative;
     }
 
-    .r16x9 { aspect-ratio: 16 / 9; }
-    .r4x3  { aspect-ratio: 4 / 3; }
+    /* Mute selection mode - show red border and enable clicking */
+    body.muteSelectMode .grid {
+      outline: 3px solid #ff4444;
+      outline-offset: -3px;
+    }
+
+    body.muteSelectMode .card {
+      cursor: pointer;
+      transition: transform 0.1s, box-shadow 0.1s;
+    }
+
+    body.muteSelectMode .card:hover {
+      transform: scale(0.98);
+      box-shadow: 0 0 0 3px rgba(255, 68, 68, 0.6);
+    }
+
+    /* Disable pointer events on video content in mute mode so clicks hit the card */
+    body.muteSelectMode .card video,
+    body.muteSelectMode .card iframe {
+      pointer-events: none;
+    }
+
+    .card {
+      background: black;
+      border-radius: 10px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .r16x9 {
+      aspect-ratio: 16 / 9;
+    }
+
+    .r4x3 {
+      aspect-ratio: 4 / 3;
+    }
 
     /* Zen mode */
     body.zen .topbar,
@@ -236,7 +294,9 @@
     }
 
     /* Height reserved for zen controller when Autohide is OFF */
-    :root { --zenBarH: 0px; }
+    :root {
+      --zenBarH: 0px;
+    }
 
     /* If Autohide is unchecked, reserve space so the bar doesn't cover videos */
     body.zen.zenPinned .app {
@@ -254,7 +314,7 @@
       bottom: 0;
       left: 0;
       right: 0;
-      background: rgba(0,0,0,0.85);
+      background: rgba(0, 0, 0, 0.85);
       padding: 6px;
       display: flex;
       gap: 6px;
@@ -290,7 +350,8 @@
     input[type="range"] {
       flex: 1;
     }
-        .zenSeekWrap {
+
+    .zenSeekWrap {
       position: relative;
       flex: 1;
       display: flex;
@@ -326,7 +387,7 @@
     .modalBackdrop {
       position: fixed;
       inset: 0;
-      background: rgba(0,0,0,0.55);
+      background: rgba(0, 0, 0, 0.55);
       display: none;
       align-items: center;
       justify-content: center;
@@ -374,7 +435,8 @@
     }
 
 
-    .kbKey, .kbAction {
+    .kbKey,
+    .kbAction {
       background: #2c2c2c;
       border: 1px solid #1f1f1f;
       border-radius: 12px;
@@ -400,7 +462,7 @@
     }
 
     .kbRow.editing .kbKey {
-      outline: 2px solid rgba(255,255,255,0.35);
+      outline: 2px solid rgba(255, 255, 255, 0.35);
     }
 
     .kbEdit:active {
@@ -422,8 +484,13 @@
 
     /* small screens */
     @media (max-width: 900px) {
-      .videoRow { grid-template-columns: 1fr auto 200px; }
-      .chip input[type="number"] { width: 62px; }
+      .videoRow {
+        grid-template-columns: 1fr auto 200px;
+      }
+
+      .chip input[type="number"] {
+        width: 62px;
+      }
     }
   </style>
 </head>
@@ -435,34 +502,30 @@
       <button id="loadBtn">Load</button>
 
       <div class="chip">
-        <span class="meta">Rows:</span>
+        Rows
         <input id="rows" type="number" min="1" value="2">
       </div>
 
       <div class="chip">
-        <span class="meta">Columns:</span>
+        Columns
         <input id="cols" type="number" min="1" value="2">
       </div>
 
+
+
       <div class="chip">
-        <span class="meta">Aspect Ratio:</span>
-        <select id="ratio">
-          <option value="r16x9">16:9</option>
-          <option value="r4x3">4:3</option>
-        </select>
+        Drift
+        <input id="threshold" type="number" step="0.05" value="0.25" title="Auto-correct drift threshold (seconds)">
       </div>
 
       <div class="chip">
         <label>
-          <input type="checkbox" id="autoHideToggle" checked>
-          Autohide Controls
+          <input type="checkbox" id="ytControlsToggle">
+          YouTube Controls
         </label>
       </div>
 
-      <div class="chip">
-        <span class="meta">Drift</span>
-        <input id="threshold" type="number" step="0.05" value="0.25" title="Auto-correct drift threshold (seconds)">
-      </div>
+
 
       <button id="keybindsBtn">Keybinds</button>
       <button id="checkUpdateBtn">Check for Updates</button>
@@ -476,7 +539,8 @@
 
     <div class="setupPane">
       <div id="videoList" class="videoList"></div>
-      <div class="videoHint">Paste a YouTube link/ID or use Browse. A new video row appears automatically once you fill one.</div>
+      <div class="videoHint">Paste a YouTube link/ID or use Browse. A new video row appears automatically once you fill
+        one.</div>
     </div>
 
     <div class="grid" id="grid"></div>
@@ -494,20 +558,18 @@
     <span id="zenTime">00:00:00 / 00:00:00</span>
 
     <div id="zenSeekWrap" class="zenSeekWrap">
-  <div id="zenHoverTime" class="zenHoverTime"></div>
-  <input id="zenSeek" type="range" min="0" max="1000" value="0">
-</div>
+      <div id="zenHoverTime" class="zenHoverTime"></div>
+      <input id="zenSeek" type="range" min="0" max="1000" value="0">
+    </div>
 
-<select id="zSpeed">
-  <option value="0.25">0.25×</option>
-  <option value="0.5">0.5×</option>
-  <option value="1" selected>1×</option>
-  <option value="1.25">1.25×</option>
-  <option value="1.5">1.5×</option>
-  <option value="2">2×</option>
-</select>
-
-
+    <select id="zSpeed">
+      <option value="0.25">0.25×</option>
+      <option value="0.5">0.5×</option>
+      <option value="1" selected>1×</option>
+      <option value="1.25">1.25×</option>
+      <option value="1.5">1.5×</option>
+      <option value="2">2×</option>
+    </select>
     <button id="zSync">Sync</button>
     <button id="zSettings">⚙</button>
   </div>
@@ -549,10 +611,17 @@
           <div class="kbAction">+30s</div>
           <button class="kbEdit" data-action="fwd30">Edit</button>
         </div>
+
+        <div class="kbRow" data-action="mute">
+          <div class="kbKey" id="kb_key_mute">M</div>
+          <div class="kbAction">Toggle Mute</div>
+          <button class="kbEdit" data-action="mute">Edit</button>
+        </div>
       </div>
     </div>
   </div>
 
   <script src="./renderer.js"></script>
 </body>
+
 </html>

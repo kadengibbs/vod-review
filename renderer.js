@@ -32,6 +32,9 @@ const ENTER_ZEN_ON_LOAD = true;
 // (We will add app-level shortcuts later.)
 let keybindsArmed = false;
 
+// Mute selection mode state
+let muteSelectMode = false;
+
 function isTypingTarget(node) {
   if (!node) return false;
   const elNode = node.nodeType === 1 ? node : node.parentElement;
@@ -93,7 +96,8 @@ const DEFAULT_BINDS = {
   rew5: "h",
   playpause: "j",
   fwd5: "k",
-  fwd30: "l"
+  fwd30: "l",
+  mute: "m"
 };
 
 let keybinds = loadKeybinds();
@@ -138,6 +142,7 @@ function renderKeybindsUi() {
   set("kb_key_playpause", keybinds.playpause);
   set("kb_key_fwd5", keybinds.fwd5);
   set("kb_key_fwd30", keybinds.fwd30);
+  set("kb_key_mute", keybinds.mute);
 }
 
 function setEditing(actionOrNull) {
@@ -164,6 +169,7 @@ ipcRenderer.on("app:customKeybind", (_evt, action) => {
     case "playpause": togglePlayPauseAll(); break;
     case "fwd5": skipAll(5); break;
     case "fwd30": skipAll(30); break;
+    case "mute": toggleMuteSelectMode(); break;
   }
 });
 
@@ -194,7 +200,7 @@ function beginLockout(ms = 450) {
   ignoreEventsUntil = nowMs() + ms;
   setTimeout(() => (syncing = false), ms);
 }
-function safe(fn) { try { fn(); } catch {} }
+function safe(fn) { try { fn(); } catch { } }
 
 function extractId(s) {
   s = (s || "").trim();
@@ -359,7 +365,7 @@ function anyPlaying() {
       const st = p.getPlayerState();
       // YT: 1 = playing, File: 1 = playing
       if (st === 1) return true;
-    } catch {}
+    } catch { }
   }
   return false;
 }
@@ -369,6 +375,70 @@ function togglePlayPauseAll() {
   else playAll(450);
   setTimeout(updatePlayPauseLabel, 120);
 }
+
+/* ---------- Mute selection mode ---------- */
+
+function toggleMuteSelectMode() {
+  muteSelectMode = !muteSelectMode;
+  document.body.classList.toggle("muteSelectMode", muteSelectMode);
+
+  // Update card click handlers
+  const cards = document.querySelectorAll("#grid .card");
+  cards.forEach((card, i) => {
+    if (muteSelectMode) {
+      card.dataset.muteClickable = "1";
+    } else {
+      delete card.dataset.muteClickable;
+    }
+  });
+}
+
+function toggleMuteForPlayer(playerIndex) {
+  const p = players[playerIndex];
+  if (!p) return;
+
+  const card = document.querySelectorAll("#grid .card")[playerIndex];
+  if (!card) return;
+
+  const isMuted = card.classList.contains("muted");
+
+  if (p.__type === "yt") {
+    // YouTube player
+    try {
+      if (isMuted) {
+        p.__yt.unMute();
+      } else {
+        p.__yt.mute();
+      }
+    } catch { }
+  } else if (p.__type === "file") {
+    // HTML5 video
+    try {
+      p.__video.muted = !isMuted;
+    } catch { }
+  }
+
+  card.classList.toggle("muted", !isMuted);
+}
+
+// Global click handler for mute selection mode (capture phase to intercept before video handlers)
+document.addEventListener("click", (e) => {
+  if (!muteSelectMode) return;
+
+  const card = e.target.closest("#grid .card");
+  if (!card) return;
+
+  // Prevent the click from triggering play/pause or any other behavior
+  e.preventDefault();
+  e.stopPropagation();
+  e.stopImmediatePropagation();
+
+  const cards = Array.from(document.querySelectorAll("#grid .card"));
+  const index = cards.indexOf(card);
+  if (index >= 0) {
+    toggleMuteForPlayer(index);
+  }
+}, true); // true = capture phase
 
 function syncNow() {
   const g = getMedianGlobalTime();
@@ -486,7 +556,7 @@ function startUiLoop() {
 
 /* ---------- Auto-hide controls ---------- */
 
-let autoHideEnabled = true;
+let autoHideEnabled = false;
 let hideTimer = null;
 
 function setAutoHide(enabled) {
@@ -546,7 +616,7 @@ function setZenMode(onMode) {
   updateZenBarSpace();
 
   setTimeout(() => {
-    setAutoHide(el("autoHideToggle")?.checked ?? true);
+    setAutoHide(false);
     updateTileHeight();
     updateSafeArea();
     updatePlayPauseLabel();
@@ -596,9 +666,9 @@ function updateSafeArea() {
 
   const safePx =
     minH < 220 ? 26 :
-    minH < 280 ? 22 :
-    minH < 360 ? 16 :
-    12;
+      minH < 280 ? 22 :
+        minH < 360 ? 16 :
+          12;
 
   document.documentElement.style.setProperty("--safe", `${safePx}px`);
 }
@@ -620,6 +690,8 @@ function applyLayout() {
     updateSafeArea();
   }, 0);
 }
+
+
 
 /* ---------- Unified adapters ---------- */
 
@@ -646,7 +718,7 @@ function makeFileAdapter(videoEl, cleanup) {
     getCurrentTime: () => videoEl.currentTime || 0,
     getDuration: () => (Number.isFinite(videoEl.duration) ? videoEl.duration : 0),
     seekTo: (t) => { videoEl.currentTime = Math.max(0, t || 0); },
-    playVideo: () => { const p = videoEl.play(); if (p?.catch) p.catch(() => {}); },
+    playVideo: () => { const p = videoEl.play(); if (p?.catch) p.catch(() => { }); },
     pauseVideo: () => videoEl.pause(),
     setPlaybackRate: (v) => { videoEl.playbackRate = Number(v) || 1; },
     getPlayerState: () => (videoEl.paused ? 2 : 1)
@@ -746,7 +818,7 @@ function ensureVideoRow(idx) {
   url.addEventListener("input", () => {
     if (url.value.trim()) {
       // If they type a URL, prefer it and clear any selected file
-      try { file.value = ""; } catch {}
+      try { file.value = ""; } catch { }
       block.dataset.hasFile = "0";
     }
     maybeAddNextRow();
@@ -832,7 +904,7 @@ function collectSourcesFromUI() {
 
 function cleanupObjectUrls() {
   for (const u of activeObjectUrls) {
-    try { URL.revokeObjectURL(u); } catch {}
+    try { URL.revokeObjectURL(u); } catch { }
   }
   activeObjectUrls = [];
 }
@@ -881,7 +953,7 @@ function loadVideos() {
 
   setStatus(`Loading ${totalCount} video(s).`, false);
 
-  players.forEach(p => { try { p.destroy(); } catch {} });
+  players.forEach(p => { try { p.destroy(); } catch { } });
   players = [];
   holders = [];
   if (el("grid")) el("grid").innerHTML = "";
@@ -930,29 +1002,40 @@ function loadVideos() {
       wrap.appendChild(holder);
       holders.push(holder.id);
 
+      // Check controls setting
+      const showControls = el("ytControlsToggle")?.checked || false;
+
       const yt = new YT.Player(holder.id, {
         width: "100%",
         height: "100%",
         videoId: src.id,
-          playerVars: {
-            disablekb: 1,        // no YouTube keyboard shortcuts
-            controls: 0,         // hide controls
-            fs: 0,               // disable fullscreen
-            rel: 0,              // reduce related videos
-            modestbranding: 1,   // remove branding
-            iv_load_policy: 3,   // hide annotations
-            playsinline: 1,
-            showinfo: 0,         // hide title / channel info (legacy but still effective)
-            enablejsapi: 1,
-            origin: "http://127.0.0.1"
-          },
+        playerVars: {
+          disablekb: 1,        // no YouTube keyboard shortcuts
+          controls: showControls ? 1 : 0,
+          fs: 0,               // disable fullscreen
+          rel: 0,              // reduce related videos
+          modestbranding: 1,   // remove branding
+          iv_load_policy: 3,   // hide annotations
+          playsinline: 1,
+          showinfo: 0,         // hide title / channel info (legacy but still effective)
+          enablejsapi: 1,
+          origin: "http://127.0.0.1"
+        },
         events: {
           onReady: () => {
             setStatus(`Loaded ${totalCount} video(s).`, false);
 
-            // Hard-disable any mouse interaction with the injected YouTube <iframe>
+            // Mute by default
+            yt.mute();
+            const card = el("grid")?.children[i];
+            if (card) card.classList.add("muted");
+
+            // Only disable mouse interaction if controls are hidden
+            // If controls are shown, we let the user interact (sync might be affected but that's expected)
             const frame = holder.querySelector("iframe");
-            if (frame) frame.style.pointerEvents = "none";
+            if (frame && !showControls) {
+              frame.style.pointerEvents = "none";
+            }
 
             afterAnyReady();
           },
@@ -1026,7 +1109,7 @@ function loadVideos() {
       const localStart = Math.max(0, Number(src.startAt) || 0);
       if (localStart > 0) {
         setTimeout(() => {
-          try { yt.seekTo(localStart, true); } catch {}
+          try { yt.seekTo(localStart, true); } catch { }
         }, 250);
       }
 
@@ -1041,6 +1124,7 @@ function loadVideos() {
     // No native HTML5 video UI (we control playback via the app)
     v.controls = false;
     v.playsInline = true;
+    v.muted = true; // Mute by default
 
     // Extra hardening: remove extra built-in menus/features when supported
     v.setAttribute("controlslist", "nodownload noremoteplayback noplaybackrate");
@@ -1048,7 +1132,7 @@ function loadVideos() {
     v.disableRemotePlayback = true;
     // Prevent native <video> keybinds from triggering via focus
     v.tabIndex = -1;
-    
+
     v.addEventListener("contextmenu", (e) => e.preventDefault());
 
     const url = URL.createObjectURL(src.file);
@@ -1056,6 +1140,10 @@ function loadVideos() {
     v.src = url;
 
     wrap.appendChild(v);
+
+    // Mute by default (visual state)
+    const card = el("grid")?.children[i];
+    if (card) card.classList.add("muted");
 
     // Wire file events for sync
     const onPlay = () => {
@@ -1149,9 +1237,9 @@ function loadVideos() {
         v.removeEventListener("seeked", onSeeked);
         v.removeEventListener("ratechange", onRateChange);
         v.removeEventListener("ended", onEnded);
-      } catch {}
-      try { v.pause(); } catch {}
-      try { v.src = ""; } catch {}
+      } catch { }
+      try { v.pause(); } catch { }
+      try { v.src = ""; } catch { }
     };
 
     players[i] = makeFileAdapter(v, cleanup);
@@ -1162,7 +1250,7 @@ function loadVideos() {
 
       const localStart = Math.max(0, Number(src.startAt) || 0);
       if (localStart > 0) {
-        try { v.currentTime = localStart; } catch {}
+        try { v.currentTime = localStart; } catch { }
       }
     }, { once: true });
   });
