@@ -35,6 +35,32 @@ let keybindsArmed = false;
 // Mute selection mode state
 let muteSelectMode = false;
 
+// Layout options: defines row structure for each video count and option
+// Each entry is an array of { count, centered } where count = videos in that row
+const LAYOUT_CONFIGS = {
+  1: { A: [{ count: 1, centered: false }] },
+  2: {
+    A: [{ count: 2, centered: false }],
+    B: [{ count: 1, centered: false }, { count: 1, centered: false }]
+  },
+  3: {
+    A: [{ count: 3, centered: false }],
+    B: [{ count: 1, centered: true }, { count: 2, centered: false }],
+    C: [{ count: 2, centered: false }, { count: 1, centered: true }]
+  },
+  4: { A: [{ count: 2, centered: false }, { count: 2, centered: false }] },
+  5: {
+    A: [{ count: 3, centered: false }, { count: 2, centered: true }],
+    B: [{ count: 2, centered: true }, { count: 3, centered: false }]
+  },
+  6: {
+    A: [{ count: 3, centered: false }, { count: 3, centered: false }]
+  }
+};
+
+let currentLayoutOption = 'A';
+let currentFilledVideoCount = 0;
+
 function isTypingTarget(node) {
   if (!node) return false;
   const elNode = node.nodeType === 1 ? node : node.parentElement;
@@ -746,11 +772,6 @@ function updateSafeArea() {
 }
 
 function applyLayout() {
-  const cols = Math.max(1, +(el("cols")?.value || 1));
-  const rows = Math.max(1, +(el("rows")?.value || 1));
-
-  document.documentElement.style.setProperty("--cols", cols);
-  document.documentElement.style.setProperty("--rows", rows);
   document.documentElement.style.setProperty("--gap", "5px");
 
   document.querySelectorAll(".playerWrap").forEach(w => {
@@ -947,15 +968,83 @@ function maybeAddNextRow() {
   if (!list) return;
 
   const blocks = Array.from(list.querySelectorAll(".videoBlock"));
-  if (blocks.length === 0) {
-    ensureVideoRow(0);
-    return;
+
+  // Find the index of the last filled row
+  let lastFilledIndex = -1;
+  for (let i = 0; i < blocks.length; i++) {
+    if (rowIsFilled(blocks[i])) {
+      lastFilledIndex = i;
+    }
   }
 
-  const last = blocks[blocks.length - 1];
-  if (rowIsFilled(last)) {
-    ensureVideoRow(blocks.length); // add one more blank
+  // We want exactly one empty row after the last filled one, but max 6 total.
+  // If no rows are filled, lastFilledIndex is -1 => target is 1 row (index 0).
+  // If row 0 is filled, lastFilledIndex is 0 => target is 2 rows.
+  let targetCount = lastFilledIndex + 2;
+  if (targetCount > 6) targetCount = 6;
+
+  // Add rows if needed
+  while (blocks.length < targetCount) {
+    const newBlock = ensureVideoRow(blocks.length);
+    blocks.push(newBlock);
   }
+
+  // Remove rows if we have too many
+  // But be careful not to remove the *last* existing row if everything is empty (targetCount=1)
+  // The loop condition `blocks.length > targetCount` handles this safely.
+  while (blocks.length > targetCount) {
+    const r = blocks.pop();
+    r.remove();
+  }
+
+  // Update filled count and layout options
+  const filledCount = lastFilledIndex + 1;
+  if (filledCount !== currentFilledVideoCount) {
+    currentFilledVideoCount = filledCount;
+    currentLayoutOption = 'A'; // Reset layout preference
+    updateLayoutOptionsUI(filledCount);
+  }
+}
+
+function updateLayoutOptionsUI(videoCount) {
+  const btnA = el("layoutA");
+  const btnB = el("layoutB");
+  const btnC = el("layoutC");
+  if (!btnA || !btnB || !btnC) return;
+
+  const configs = LAYOUT_CONFIGS[videoCount] || {};
+  const hasA = !!configs.A;
+  const hasB = !!configs.B;
+  const hasC = !!configs.C;
+
+  btnA.style.display = hasA ? "" : "none";
+  btnB.style.display = hasB ? "" : "none";
+  btnC.style.display = hasC ? "" : "none";
+
+  // Generate icon content for each button
+  if (hasA) btnA.innerHTML = generateLayoutIcon(configs.A);
+  if (hasB) btnB.innerHTML = generateLayoutIcon(configs.B);
+  if (hasC) btnC.innerHTML = generateLayoutIcon(configs.C);
+
+  // If current option is not available, reset to 'A'
+  if (!configs[currentLayoutOption]) {
+    currentLayoutOption = 'A';
+  }
+
+  // Update active state
+  btnA.classList.toggle("active", currentLayoutOption === 'A');
+  btnB.classList.toggle("active", currentLayoutOption === 'B');
+  btnC.classList.toggle("active", currentLayoutOption === 'C');
+}
+
+function generateLayoutIcon(rows) {
+  // rows is an array of { count, centered } objects
+  let html = '';
+  for (const row of rows) {
+    const boxes = '<div class="layoutIconBox"></div>'.repeat(row.count);
+    html += `<div class="layoutIconRow">${boxes}</div>`;
+  }
+  return html;
 }
 
 function initVideoSetupUI() {
@@ -1018,10 +1107,6 @@ function loadVideos() {
     return;
   }
 
-  const cols = Math.max(1, +(el("cols")?.value || 1));
-  const rows = Math.max(1, +(el("rows")?.value || 1));
-  const capacity = cols * rows;
-
   const totalCount = realSources.length;
 
   if (totalCount <= 0) {
@@ -1029,10 +1114,6 @@ function loadVideos() {
     return;
   }
 
-  if (totalCount > capacity) {
-    setStatus(`Error: ${totalCount} video(s) but layout only allows ${capacity} (${cols}×${rows}).`, true);
-    return;
-  }
 
   // Arm native keybind blocking only after Load succeeds
   keybindsArmed = true;
@@ -1051,6 +1132,38 @@ function loadVideos() {
   holders = [];
   if (el("grid")) el("grid").innerHTML = "";
   cleanupObjectUrls();
+
+  // Get layout configuration for this video count
+  const layoutConfig = LAYOUT_CONFIGS[totalCount]?.[currentLayoutOption] ||
+    LAYOUT_CONFIGS[totalCount]?.A ||
+    [{ count: totalCount, centered: false }];
+
+  // Create row containers based on layout config
+  const rowContainers = [];
+  for (const rowDef of layoutConfig) {
+    const rowDiv = document.createElement("div");
+    rowDiv.className = "gridRow" + (rowDef.centered ? " centered" : "");
+    el("grid").appendChild(rowDiv);
+    rowContainers.push({ el: rowDiv, count: rowDef.count, filled: 0 });
+  }
+
+  // Helper to get next available row container
+  let currentRowIdx = 0;
+  const getRowForCard = () => {
+    while (currentRowIdx < rowContainers.length) {
+      const row = rowContainers[currentRowIdx];
+      if (row.filled < row.count) {
+        row.filled++;
+        return row.el;
+      }
+      currentRowIdx++;
+    }
+    // Fallback: create a new row if needed
+    const fallbackRow = document.createElement("div");
+    fallbackRow.className = "gridRow";
+    el("grid").appendChild(fallbackRow);
+    return fallbackRow;
+  };
 
   for (let i = 0; i < totalCount; i++) {
     const card = document.createElement("div");
@@ -1140,7 +1253,7 @@ function loadVideos() {
     wrap.className = "playerWrap r16x9";
 
     card.appendChild(wrap);
-    el("grid").appendChild(card);
+    getRowForCard().appendChild(card);
 
     card.__wrap = wrap;
   }
@@ -1162,7 +1275,7 @@ function loadVideos() {
     showBarNow();
   }
 
-  const cards = Array.from(el("grid")?.children || []);
+  const cards = Array.from(el("grid")?.querySelectorAll(".card") || []);
 
   // Build players in the SAME ORDER as the setup list
   realSources.forEach((src, i) => {
@@ -1200,7 +1313,7 @@ function loadVideos() {
 
             // Mute by default
             yt.mute();
-            const card = el("grid")?.children[i];
+            const card = cards[i];
             if (card) card.classList.add("muted");
 
             // Only disable mouse interaction if controls are hidden
@@ -1747,3 +1860,17 @@ startUiLoop();
 
 // Initialize version label (and enables update checks)
 initAppVersionUI();
+
+// Layout option button handlers
+on("layoutA", "click", () => {
+  currentLayoutOption = 'A';
+  updateLayoutOptionsUI(currentFilledVideoCount);
+});
+on("layoutB", "click", () => {
+  currentLayoutOption = 'B';
+  updateLayoutOptionsUI(currentFilledVideoCount);
+});
+on("layoutC", "click", () => {
+  currentLayoutOption = 'C';
+  updateLayoutOptionsUI(currentFilledVideoCount);
+});

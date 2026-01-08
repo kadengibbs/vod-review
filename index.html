@@ -119,7 +119,7 @@
     /* Make integer inputs narrower */
     #rows,
     #cols {
-      width: 20px;
+      width: 22px;
     }
 
     .chip input[type="number"]::-webkit-outer-spin-button,
@@ -137,6 +137,55 @@
     .chip input[type="checkbox"] {
       width: 13.5px;
       height: 13.5px;
+    }
+
+    .layoutBtn {
+      min-width: 50px;
+      height: 36px;
+      padding: 4px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: transparent;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .layoutBtn.active {
+      background: #111111;
+      border: 1px solid #666;
+      box-shadow: 0 0 0 1px #555;
+    }
+
+    .layoutBtn:hover:not(.active) {
+      border-color: #444;
+    }
+
+    .layoutIconRow {
+      display: flex;
+      gap: 2px;
+      justify-content: center;
+    }
+
+    .layoutIconBox {
+      width: 18px;
+      height: 12px;
+      background: #333333;
+      border-radius: 2px;
+    }
+
+    .gridRow {
+      display: flex;
+      flex: 1;
+      gap: 4px;
+      min-height: 0;
+    }
+
+    .gridRow.centered {
+      justify-content: center;
     }
 
     .status {
@@ -201,7 +250,7 @@
       padding: 0 14px;
       height: 46px;
       border-radius: 12px;
-      background: #2a2a2a;
+      background: #3a3a3a;
     }
 
     .videoRow .startTime {
@@ -260,6 +309,7 @@
 
     .volSlider {
       -webkit-appearance: none;
+      appearance: none;
       width: 100%;
       height: 4px;
       background: #444;
@@ -302,9 +352,8 @@
     .grid {
       flex: 1 1 auto;
       height: 100%;
-      display: grid;
-      grid-template-columns: repeat(var(--cols), 1fr);
-      grid-template-rows: repeat(var(--rows), 1fr);
+      display: flex;
+      flex-direction: column;
       gap: var(--gap);
       padding: var(--gap);
       overflow: hidden;
@@ -312,6 +361,8 @@
     }
 
     .card {
+      flex: 1;
+      min-width: 0;
       background: black;
       border-radius: 10px;
       overflow: hidden;
@@ -585,17 +636,14 @@
       <!-- required order -->
       <button id="loadBtn">Load</button>
 
-      <div class="chip">
-        Rows
-        <input id="rows" type="number" min="1" value="2">
+
+
+      <div id="layoutOptions" class="chip" style="gap: 0px; padding-right: 0px;">
+        <span style="margin-right: 12px;">Layout:</span>
+        <button id="layoutA" class="layoutBtn active" style="display:none;"></button>
+        <button id="layoutB" class="layoutBtn" style="display:none;"></button>
+        <button id="layoutC" class="layoutBtn" style="display:none;"></button>
       </div>
-
-      <div class="chip">
-        Columns
-        <input id="cols" type="number" min="1" value="2">
-      </div>
-
-
 
       <div class="chip">
         Drift
@@ -624,7 +672,7 @@
     <div class="setupPane">
       <div id="videoList" class="videoList"></div>
       <div class="videoHint">Paste a YouTube link/ID or use Browse. A new video row appears automatically once you fill
-        one.</div>
+        one up to six videos.</div>
     </div>
 
     <div class="grid" id="grid"></div>
