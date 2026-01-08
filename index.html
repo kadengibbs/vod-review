@@ -392,6 +392,49 @@
       pointer-events: none;
     }
 
+    /* Focus selection mode - show blue outline and enable clicking */
+    body.focusSelectMode .grid {
+      outline: 3px solid #4488ff;
+      outline-offset: -3px;
+    }
+
+    body.focusSelectMode .card {
+      cursor: pointer;
+      transition: transform 0.1s, box-shadow 0.1s;
+    }
+
+    body.focusSelectMode .card:hover {
+      transform: scale(0.98);
+      box-shadow: 0 0 0 3px rgba(68, 136, 255, 0.6);
+    }
+
+    body.focusSelectMode .card video,
+    body.focusSelectMode .card iframe {
+      pointer-events: none;
+    }
+
+    /* Focus layout - main video + bottom strip using CSS Grid */
+    body.focusLayout .grid {
+      display: grid !important;
+      grid-template-rows: 70% 30%;
+      grid-auto-columns: 1fr;
+      gap: var(--gap);
+    }
+
+    /* Make gridRows invisible so cards participate in grid directly */
+    body.focusLayout .grid .gridRow {
+      display: contents;
+    }
+
+    body.focusLayout .grid .focusedCard {
+      grid-row: 1;
+      grid-column: 1 / -1;
+    }
+
+    body.focusLayout .grid .unfocusedCard {
+      grid-row: 2;
+    }
+
     .card {
       background: black;
       border-radius: 10px;
@@ -748,6 +791,12 @@
           <div class="kbKey" id="kb_key_mute">M</div>
           <div class="kbAction">Toggle Mute</div>
           <button class="kbEdit" data-action="mute">Edit</button>
+        </div>
+
+        <div class="kbRow" data-action="focus">
+          <div class="kbKey" id="kb_key_focus">F</div>
+          <div class="kbAction">Toggle Focus</div>
+          <button class="kbEdit" data-action="focus">Edit</button>
         </div>
       </div>
     </div>

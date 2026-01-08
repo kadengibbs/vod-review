@@ -35,6 +35,10 @@ let keybindsArmed = false;
 // Mute selection mode state
 let muteSelectMode = false;
 
+// Focus mode state
+let focusMode = false;
+let focusedPlayerIndex = null;
+
 // Layout options: defines row structure for each video count and option
 // Each entry is an array of { count, centered } where count = videos in that row
 const LAYOUT_CONFIGS = {
@@ -155,7 +159,8 @@ const DEFAULT_BINDS = {
   playpause: "j",
   fwd5: "k",
   fwd30: "l",
-  mute: "m"
+  mute: "m",
+  focus: "f"
 };
 
 let keybinds = loadKeybinds();
@@ -201,6 +206,7 @@ function renderKeybindsUi() {
   set("kb_key_fwd5", keybinds.fwd5);
   set("kb_key_fwd30", keybinds.fwd30);
   set("kb_key_mute", keybinds.mute);
+  set("kb_key_focus", keybinds.focus);
 }
 
 function setEditing(actionOrNull) {
@@ -228,6 +234,7 @@ ipcRenderer.on("app:customKeybind", (_evt, action) => {
     case "fwd5": skipAll(5); break;
     case "fwd30": skipAll(30); break;
     case "mute": toggleMuteSelectMode(); break;
+    case "focus": toggleFocusSelectMode(); break;
   }
 });
 
@@ -440,6 +447,12 @@ function toggleMuteSelectMode() {
   muteSelectMode = !muteSelectMode;
   document.body.classList.toggle("muteSelectMode", muteSelectMode);
 
+  // Exit focus select mode if entering mute mode
+  if (muteSelectMode && focusMode) {
+    focusMode = false;
+    document.body.classList.remove("focusSelectMode");
+  }
+
   // Update card click handlers
   const cards = document.querySelectorAll("#grid .card");
   cards.forEach((card, i) => {
@@ -537,6 +550,117 @@ document.addEventListener("click", (e) => {
     toggleMuteForPlayer(index);
   }
 }, true); // true = capture phase
+
+/* ---------- Focus selection mode ---------- */
+
+function toggleFocusSelectMode() {
+  // Only allow focus mode if 2+ videos loaded
+  if (players.length < 2) return;
+
+  // If we're in focus layout mode, exit it
+  if (document.body.classList.contains("focusLayout")) {
+    exitFocusLayout();
+    return;
+  }
+
+  // Toggle focus select mode
+  focusMode = !focusMode;
+  document.body.classList.toggle("focusSelectMode", focusMode);
+
+  // Exit mute select mode if entering focus mode
+  if (focusMode && muteSelectMode) {
+    muteSelectMode = false;
+    document.body.classList.remove("muteSelectMode");
+  }
+}
+
+function setFocusedPlayer(playerIndex) {
+  if (playerIndex < 0 || playerIndex >= players.length) return;
+
+  focusedPlayerIndex = playerIndex;
+  document.body.classList.remove("focusSelectMode");
+  focusMode = false;
+  applyFocusLayout();
+}
+
+function applyFocusLayout() {
+  const grid = el("grid");
+  if (!grid || focusedPlayerIndex === null) return;
+
+  // Find all cards - they could be in gridRows or directly in grid
+  const cards = Array.from(grid.querySelectorAll(".card"));
+  if (cards.length < 2) return;
+
+  // Just add CSS classes - no DOM manipulation!
+  document.body.classList.add("focusLayout");
+
+  // Count unfocused cards and set grid columns dynamically
+  const unfocusedCount = cards.length - 1;
+  grid.style.gridTemplateColumns = `repeat(${unfocusedCount}, 1fr)`;
+
+  // Mark the focused card and set CSS order
+  cards.forEach((card, i) => {
+    if (i === focusedPlayerIndex) {
+      card.classList.add("focusedCard");
+      card.style.order = "0";
+    } else {
+      card.classList.remove("focusedCard");
+      card.classList.add("unfocusedCard");
+      card.style.order = "1";
+    }
+  });
+
+  // Hide gridRows (they interfere with flex layout)
+  grid.querySelectorAll(".gridRow").forEach(row => {
+    row.style.display = "contents";
+  });
+}
+
+function exitFocusLayout() {
+  const grid = el("grid");
+  if (!grid) return;
+
+  document.body.classList.remove("focusLayout");
+  focusedPlayerIndex = null;
+
+  // Remove focus classes and order styles
+  const cards = Array.from(grid.querySelectorAll(".card"));
+  cards.forEach(card => {
+    card.classList.remove("focusedCard", "unfocusedCard");
+    card.style.order = "";
+  });
+
+  // Reset grid columns
+  grid.style.gridTemplateColumns = "";
+
+  // Restore gridRows
+  grid.querySelectorAll(".gridRow").forEach(row => {
+    row.style.display = "";
+  });
+
+  setTimeout(() => {
+    updateTileHeight();
+    updateSafeArea();
+  }, 0);
+}
+
+// Global click handler for focus selection mode (capture phase)
+document.addEventListener("click", (e) => {
+  if (!focusMode) return;
+
+  const card = e.target.closest("#grid .card");
+  if (!card) return;
+
+  e.preventDefault();
+  e.stopPropagation();
+  e.stopImmediatePropagation();
+
+  const cards = Array.from(document.querySelectorAll("#grid .card"));
+  const index = cards.indexOf(card);
+  if (index >= 0) {
+    setFocusedPlayer(index);
+  }
+}, true);
 
 function syncNow() {
   const g = getMedianGlobalTime();
@@ -1767,6 +1891,20 @@ on("zSpeed", "change", () => {
 });
 
 on("zSettings", "click", () => {
+  // Exit focus modes if active before showing settings
+  if (document.body.classList.contains("focusLayout")) {
+    exitFocusLayout();
+  }
+  // Also exit focus select mode
+  if (focusMode) {
+    focusMode = false;
+    document.body.classList.remove("focusSelectMode");
+  }
+  // Also exit mute select mode
+  if (muteSelectMode) {
+    muteSelectMode = false;
+    document.body.classList.remove("muteSelectMode");
+  }
   toggleZenMode();
 });
 
