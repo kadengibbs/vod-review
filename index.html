@@ -413,12 +413,29 @@
       pointer-events: none;
     }
 
+    /* Draw mode - block all video interaction */
+    body.drawMode .card video,
+    body.drawMode .card iframe {
+      pointer-events: none;
+    }
+
+    body.drawMode .grid {
+      outline: 3px solid #22cc44;
+      outline-offset: -3px;
+    }
+
     /* Focus layout - main video + bottom strip using CSS Grid */
     body.focusLayout .grid {
       display: grid !important;
-      grid-template-rows: 70% 30%;
+      grid-template-rows: 7fr 3fr;
       grid-auto-columns: 1fr;
       gap: var(--gap);
+      height: 100%;
+    }
+
+    /* When in focus layout with zen bar pinned, shrink grid height to avoid overlap */
+    body.focusLayout.zen.zenPinned .grid {
+      height: calc(100% - var(--zenBarH));
     }
 
     /* Make gridRows invisible so cards participate in grid directly */
@@ -492,6 +509,7 @@
       bottom: 0;
       left: 0;
       right: 0;
+      z-index: 1002;
       background: rgba(0, 0, 0, 0.85);
       padding: 6px;
       display: flex;
@@ -797,6 +815,12 @@
           <div class="kbKey" id="kb_key_focus">F</div>
           <div class="kbAction">Toggle Focus</div>
           <button class="kbEdit" data-action="focus">Edit</button>
+        </div>
+
+        <div class="kbRow" data-action="draw">
+          <div class="kbKey" id="kb_key_draw">D</div>
+          <div class="kbAction">Toggle Draw</div>
+          <button class="kbEdit" data-action="draw">Edit</button>
         </div>
       </div>
     </div>

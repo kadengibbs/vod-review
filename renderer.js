@@ -35,6 +35,17 @@ let keybindsArmed = false;
 // Mute selection mode state
 let muteSelectMode = false;
 
+// Draw mode state
+let drawMode = false;
+let drawColor = "#ff0000";
+let isDrawing = false;
+let drawCanvas = null;
+let drawCtx = null;
+let lastX = 0;
+let lastY = 0;
+let drawHistory = [];  // Stack of canvas states for undo
+let redoHistory = [];  // Stack for redo
+
 // Focus mode state
 let focusMode = false;
 let focusedPlayerIndex = null;
@@ -160,7 +171,8 @@ const DEFAULT_BINDS = {
   fwd5: "k",
   fwd30: "l",
   mute: "m",
-  focus: "f"
+  focus: "f",
+  draw: "d"
 };
 
 let keybinds = loadKeybinds();
@@ -207,6 +219,7 @@ function renderKeybindsUi() {
   set("kb_key_fwd30", keybinds.fwd30);
   set("kb_key_mute", keybinds.mute);
   set("kb_key_focus", keybinds.focus);
+  set("kb_key_draw", keybinds.draw);
 }
 
 function setEditing(actionOrNull) {
@@ -233,8 +246,9 @@ ipcRenderer.on("app:customKeybind", (_evt, action) => {
     case "playpause": togglePlayPauseAll(); break;
     case "fwd5": skipAll(5); break;
     case "fwd30": skipAll(30); break;
-    case "mute": toggleMuteSelectMode(); break;
-    case "focus": toggleFocusSelectMode(); break;
+    case "mute": if (!drawMode) toggleMuteSelectMode(); break;
+    case "focus": if (!drawMode) toggleFocusSelectMode(); break;
+    case "draw": toggleDrawMode(); break;
   }
 });
 
@@ -661,6 +675,250 @@ document.addEventListener("click", (e) => {
     setFocusedPlayer(index);
   }
 }, true);
+
+/* ---------- Draw mode ---------- */
+
+const DRAW_COLORS = [
+  { name: "gray", hex: "#808080" },
+  { name: "black", hex: "#1a1a1a" },
+  { name: "white", hex: "#ffffff" },
+  { name: "yellow", hex: "#ffeb3b" },
+  { name: "orange", hex: "#ff9800" },
+  { name: "red", hex: "#f44336" },
+  { name: "pink", hex: "#e91e63" },
+  { name: "purple", hex: "#9c27b0" },
+  { name: "blue", hex: "#2196f3" },
+  { name: "green", hex: "#4caf50" }
+];
+
+function createDrawCanvas() {
+  if (drawCanvas) return;
+
+  const grid = el("grid");
+  if (!grid) return;
+
+  drawCanvas = document.createElement("canvas");
+  drawCanvas.id = "drawCanvas";
+  drawCanvas.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 1000;
+    cursor: crosshair;
+    pointer-events: auto;
+  `;
+  document.body.appendChild(drawCanvas);
+
+  drawCanvas.width = window.innerWidth;
+  drawCanvas.height = window.innerHeight;
+
+  drawCtx = drawCanvas.getContext("2d");
+  drawCtx.lineCap = "round";
+  drawCtx.lineJoin = "round";
+  drawCtx.lineWidth = 4;
+  drawCtx.strokeStyle = drawColor;
+
+  drawCanvas.addEventListener("mousedown", startDrawing);
+  drawCanvas.addEventListener("mousemove", draw);
+  drawCanvas.addEventListener("mouseup", stopDrawing);
+  drawCanvas.addEventListener("mouseout", stopDrawing);
+  window.addEventListener("resize", resizeDrawCanvas);
+  document.addEventListener("keydown", handleDrawKeydown);
+}
+
+function resizeDrawCanvas() {
+  if (!drawCanvas || !drawCtx) return;
+  const imageData = drawCtx.getImageData(0, 0, drawCanvas.width, drawCanvas.height);
+  drawCanvas.width = window.innerWidth;
+  drawCanvas.height = window.innerHeight;
+  drawCtx.putImageData(imageData, 0, 0);
+  drawCtx.lineCap = "round";
+  drawCtx.lineJoin = "round";
+  drawCtx.lineWidth = 4;
+  drawCtx.strokeStyle = drawColor;
+}
+
+function startDrawing(e) {
+  isDrawing = true;
+  lastX = e.clientX;
+  lastY = e.clientY;
+}
+
+function draw(e) {
+  if (!isDrawing) return;
+  drawCtx.beginPath();
+  drawCtx.moveTo(lastX, lastY);
+  drawCtx.lineTo(e.clientX, e.clientY);
+  drawCtx.stroke();
+  lastX = e.clientX;
+  lastY = e.clientY;
+}
+
+function stopDrawing() {
+  if (isDrawing && drawCanvas && drawCtx) {
+    // Save current state to history for undo
+    drawHistory.push(drawCanvas.toDataURL());
+    redoHistory = [];  // Clear redo stack on new drawing
+  }
+  isDrawing = false;
+}
+
+function removeDrawCanvas() {
+  if (drawCanvas) {
+    drawCanvas.removeEventListener("mousedown", startDrawing);
+    drawCanvas.removeEventListener("mousemove", draw);
+    drawCanvas.removeEventListener("mouseup", stopDrawing);
+    drawCanvas.removeEventListener("mouseout", stopDrawing);
+    window.removeEventListener("resize", resizeDrawCanvas);
+    document.removeEventListener("keydown", handleDrawKeydown);
+    drawCanvas.remove();
+    drawCanvas = null;
+    drawCtx = null;
+    drawHistory = [];
+    redoHistory = [];
+  }
+}
+
+function handleDrawKeydown(e) {
+  if (!drawMode || !drawCanvas || !drawCtx) return;
+
+  // Ctrl+Z for undo
+  if (e.ctrlKey && e.key.toLowerCase() === "z") {
+    e.preventDefault();
+    undoDraw();
+  }
+  // Ctrl+Y for redo
+  if (e.ctrlKey && e.key.toLowerCase() === "y") {
+    e.preventDefault();
+    redoDraw();
+  }
+}
+
+function undoDraw() {
+  if (drawHistory.length === 0) return;
+
+  // Save current state to redo stack
+  redoHistory.push(drawCanvas.toDataURL());
+
+  // Pop last state from history
+  const previousState = drawHistory.pop();
+
+  // Restore previous state (or clear if it was the first stroke)
+  if (drawHistory.length === 0) {
+    // Clear canvas completely
+    drawCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+  } else {
+    // Load the state before the last stroke
+    const img = new Image();
+    img.onload = () => {
+      drawCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+      drawCtx.drawImage(img, 0, 0);
+    };
+    img.src = drawHistory[drawHistory.length - 1];
+  }
+}
+
+function redoDraw() {
+  if (redoHistory.length === 0) return;
+
+  // Pop from redo stack
+  const redoState = redoHistory.pop();
+
+  // Save current to history
+  drawHistory.push(drawCanvas.toDataURL());
+
+  // Restore redo state
+  const img = new Image();
+  img.onload = () => {
+    drawCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+    drawCtx.drawImage(img, 0, 0);
+  };
+  img.src = redoState;
+}
+
+function createColorSelector() {
+  const existing = el("drawColorBar");
+  if (existing) existing.remove();
+
+  const bar = document.createElement("div");
+  bar.id = "drawColorBar";
+  bar.style.cssText = `
+    position: fixed;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1001;
+    background: #1a1a1a;
+    border-radius: 25px;
+    padding: 8px 16px;
+    display: flex;
+    gap: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  `;
+
+  DRAW_COLORS.forEach(color => {
+    const btn = document.createElement("button");
+    btn.className = "drawColorBtn";
+    btn.dataset.color = color.hex;
+    btn.title = color.name;
+    btn.style.cssText = `
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: 2px solid ${color.hex === drawColor ? "#fff" : "transparent"};
+      background: ${color.hex};
+      cursor: pointer;
+      padding: 0;
+      transition: transform 0.1s, border-color 0.1s;
+    `;
+
+    btn.addEventListener("click", () => {
+      drawColor = color.hex;
+      if (drawCtx) drawCtx.strokeStyle = drawColor;
+      document.querySelectorAll(".drawColorBtn").forEach(b => {
+        b.style.borderColor = b.dataset.color === drawColor ? "#fff" : "transparent";
+      });
+    });
+
+    btn.addEventListener("mouseenter", () => { btn.style.transform = "scale(1.15)"; });
+    btn.addEventListener("mouseleave", () => { btn.style.transform = "scale(1)"; });
+
+    bar.appendChild(btn);
+  });
+
+  document.body.appendChild(bar);
+}
+
+function removeColorSelector() {
+  const bar = el("drawColorBar");
+  if (bar) bar.remove();
+}
+
+function toggleDrawMode() {
+  drawMode = !drawMode;
+  document.body.classList.toggle("drawMode", drawMode);
+
+  if (drawMode) {
+    pauseAll(100);
+
+    if (muteSelectMode) {
+      muteSelectMode = false;
+      document.body.classList.remove("muteSelectMode");
+    }
+    if (focusMode) {
+      focusMode = false;
+      document.body.classList.remove("focusSelectMode");
+    }
+
+    createDrawCanvas();
+    createColorSelector();
+  } else {
+    removeDrawCanvas();
+    removeColorSelector();
+  }
+}
 
 function syncNow() {
   const g = getMedianGlobalTime();
