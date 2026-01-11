@@ -75,6 +75,7 @@ const LAYOUT_CONFIGS = {
 
 let currentLayoutOption = 'A';
 let currentFilledVideoCount = 0;
+let cachedDriftBeforeTwitch = null;
 
 function isTypingTarget(node) {
   if (!node) return false;
@@ -265,11 +266,24 @@ function on(id, event, handler) {
   node.addEventListener(event, handler);
 }
 
-function setStatus(msg, isError = false) {
+let statusTimer = null;
+function setStatus(msg, isError = false, timeoutMs = 0) {
   const s = el("status");
   if (!s) return;
   s.textContent = msg;
   s.classList.toggle("error", isError);
+
+  if (statusTimer) {
+    clearTimeout(statusTimer);
+    statusTimer = null;
+  }
+
+  if (timeoutMs > 0) {
+    statusTimer = setTimeout(() => {
+      s.textContent = "";
+      s.classList.remove("error");
+    }, timeoutMs);
+  }
 }
 
 function nowMs() { return Date.now(); }
@@ -288,6 +302,32 @@ function extractId(s) {
   try {
     const u = new URL(s);
     return u.searchParams.get("v") || u.pathname.split("/").pop();
+  } catch {
+    return null;
+  }
+}
+
+// Extract Twitch VOD ID from URL or bare ID
+// Accepts: "v123456789", "123456789", "https://www.twitch.tv/videos/123456789"
+function extractTwitchId(s) {
+  s = (s || "").trim();
+  if (!s) return null;
+
+  // Check if it's just a numeric ID or v-prefixed ID
+  if (/^v?\d{8,12}$/.test(s)) {
+    return s.replace(/^v/, "");
+  }
+
+  // Try to parse as URL
+  try {
+    const u = new URL(s);
+    if (!u.hostname.includes("twitch.tv")) return null;
+
+    // Match /videos/123456789
+    const videoMatch = u.pathname.match(/\/videos\/(\d+)/);
+    if (videoMatch) return videoMatch[1];
+
+    return null;
   } catch {
     return null;
   }
@@ -340,7 +380,11 @@ function shouldParticipate(i, globalTarget) {
   const d = getDurationSafe(i);
   if (!Number.isFinite(d) || d <= 0) return true;
 
-  const endGlobal = (d + getOffset(i));
+  let endGlobal = (d + getOffset(i));
+  if (players[i]?.__type === "twitch") {
+    endGlobal -= 2.0; // Effective end for Twitch is 2s earlier
+  }
+
   if (endedFlags[i]) {
     // If global target is before its end, we can rejoin
     if (globalTarget < endGlobal - END_EPS) return true;
@@ -354,7 +398,11 @@ function clearEndedIfRejoining(i, globalT) {
   const d = getDurationSafe(i);
   if (!Number.isFinite(d) || d <= 0) return;
 
-  const endGlobal = d + getOffset(i);
+  let endGlobal = d + getOffset(i);
+  if (players[i]?.__type === "twitch") {
+    endGlobal -= 2.0;
+  }
+
   if (globalT <= endGlobal - END_EPS) endedFlags[i] = false;
 }
 
@@ -399,6 +447,10 @@ function getGlobalTimes(globalTarget = null) {
   for (let i = 0; i < players.length; i++) {
     if (!shouldParticipate(i, globalTarget)) continue;
 
+    // Skip Twitch players that aren't fully ready (unreliable time during init)
+    const p = players[i];
+    if (p && p.__type === "twitch" && !p.__ready) continue;
+
     const ct = getCurrentTimeSafe(i);
     times.push(ct + getOffset(i));
   }
@@ -408,7 +460,12 @@ function getGlobalTimes(globalTarget = null) {
 function getMedianGlobalTime() {
   // Use current cursor as the participation target so "ended" videos don't pull the median backward
   const times = getGlobalTimes(globalCursorTime);
-  return times.length ? median(times) : globalCursorTime;
+  if (times.length) {
+    const m = median(times);
+    globalCursorTime = m;
+    return m;
+  }
+  return globalCursorTime;
 }
 
 function refreshGlobalCursorFromActive(globalTarget = null) {
@@ -440,6 +497,8 @@ function pauseAll(lockoutMs = 450) {
 function anyPlaying() {
   for (const p of players) {
     if (!p) continue;
+    // Skip Twitch players that aren't fully ready (unreliable state during init)
+    if (p.__type === "twitch" && !p.__ready) continue;
     try {
       const st = p.getPlayerState();
       // YT: 1 = playing, File: 1 = playing
@@ -503,9 +562,13 @@ function toggleMuteForPlayer(playerIndex) {
       }
     } catch { }
   } else if (p.__type === "file") {
-    // HTML5 video
     try {
       p.__video.muted = !isMuted;
+    } catch { }
+  } else if (p.__type === "twitch") {
+    // Twitch player
+    try {
+      p.__twitch.setMuted(!isMuted);
     } catch { }
   }
 
@@ -922,12 +985,12 @@ function toggleDrawMode() {
 
 function syncNow() {
   const g = getMedianGlobalTime();
-  seekAllToGlobal(g, 650);
+  seekAllToGlobal(g, 2000);
 }
 
 function skipAll(deltaSeconds) {
   const g = getMedianGlobalTime() + (Number(deltaSeconds) || 0);
-  seekAllToGlobal(g, 650);
+  seekAllToGlobal(g, 2000);
 }
 
 function updatePlayPauseLabel() {
@@ -966,7 +1029,7 @@ function seekAllToGlobal(globalT, lockoutMs = 650) {
   }
 
   setTimeout(() => {
-    refreshGlobalCursorFromActive(globalCursorTime);
+    // refreshGlobalCursorFromActive(globalCursorTime); // REMOVED: causes jump-back if players lag
     updateUiTime();
   }, 120);
 }
@@ -976,7 +1039,7 @@ function seekAllToGlobal(globalT, lockoutMs = 650) {
 function updateUiTime() {
   if (!players.length) return;
 
-  const g = getMedianGlobalTime();
+  const g = (syncing || inLockout()) ? globalCursorTime : getMedianGlobalTime();
   const d = getMaxGlobalEnd();
 
   const timeLabel = el("timeLabel");
@@ -1015,6 +1078,18 @@ function startDriftLoop() {
     const gMed = getMedianGlobalTime();
 
     for (let i = 0; i < players.length; i++) {
+      // Special check for Twitch: prevent "Up Next" screen
+      // If within 1s of end, force pause (which effectively hides the end screen)
+      if (players[i]?.__type === "twitch") {
+        const d = getDurationSafe(i);
+        const t = getCurrentTimeSafe(i);
+        if (d > 0 && t > d - 2.0) {
+          safe(() => players[i].pauseVideo());
+          endedFlags[i] = true;
+          continue; // Don't do drift correction on a player we just paused
+        }
+      }
+
       if (!shouldParticipate(i, gMed)) continue;
 
       const off = getOffset(i);
@@ -1211,6 +1286,64 @@ function makeFileAdapter(videoEl, cleanup) {
   };
 }
 
+function makeTwitchAdapter(twitchPlayer, holderEl) {
+  return {
+    __type: "twitch",
+    __twitch: twitchPlayer,
+    __holder: holderEl,
+    __ready: false, // Set to true after initialization completes
+    destroy: () => {
+      // Twitch player doesn't have a destroy method, so we remove the holder element
+      try { holderEl?.remove(); } catch { }
+    },
+    getCurrentTime: () => {
+      try { return twitchPlayer.getCurrentTime() || 0; } catch { return 0; }
+    },
+    getDuration: () => {
+      try { return twitchPlayer.getDuration() || 0; } catch { return 0; }
+    },
+    seekTo: (t) => {
+      try { twitchPlayer.seek(Math.max(0, t || 0)); } catch { }
+    },
+    playVideo: () => {
+      try { twitchPlayer.play(); } catch { }
+    },
+    pauseVideo: () => {
+      try { twitchPlayer.pause(); } catch { }
+    },
+    setPlaybackRate: (v) => {
+      // Twitch doesn't support playback rate - no-op
+    },
+    getPlayerState: () => {
+      try {
+        return twitchPlayer.isPaused() ? 2 : 1;
+      } catch { return 2; }
+    },
+    setVolume: (v) => {
+      try {
+        // Twitch volume is 0-1, input is 0-100
+        twitchPlayer.setVolume(Math.max(0, Math.min(100, v)) / 100);
+        if (v === 0) twitchPlayer.setMuted(true);
+      } catch { }
+    },
+    getVolume: () => {
+      try {
+        if (twitchPlayer.getMuted()) return 0;
+        return (twitchPlayer.getVolume() || 0) * 100;
+      } catch { return 0; }
+    },
+    unMute: () => {
+      try { twitchPlayer.setMuted(false); } catch { }
+    },
+    mute: () => {
+      try { twitchPlayer.setMuted(true); } catch { }
+    },
+    isMuted: () => {
+      try { return twitchPlayer.getMuted(); } catch { return true; }
+    }
+  };
+}
+
 /* ---------- YouTube API ready ---------- */
 
 window.onYouTubeIframeAPIReady = () => {
@@ -1246,6 +1379,35 @@ function formatStartPlaceholder() {
   return "Start Time: hh:mm:ss";
 }
 
+function checkTwitchConstraints() {
+  const list = el("videoList");
+  if (!list) return;
+
+  // Check if any visible video input contains a Twitch URL
+  const inputs = Array.from(list.querySelectorAll(".videoUrl"));
+  const hasTwitch = inputs.some(input => !!extractTwitchId(input.value));
+
+  const tInput = el("threshold");
+  if (!tInput) return;
+
+  if (hasTwitch) {
+    if (cachedDriftBeforeTwitch === null) {
+      cachedDriftBeforeTwitch = tInput.value;
+    }
+    tInput.min = "1";
+    if (Number(tInput.value) < 1) {
+      tInput.value = "1";
+      setStatus("Minimum drift required with Twitch is 1 sec", true, 3000);
+    }
+  } else {
+    tInput.removeAttribute("min");
+    if (cachedDriftBeforeTwitch !== null) {
+      tInput.value = cachedDriftBeforeTwitch;
+      cachedDriftBeforeTwitch = null;
+    }
+  }
+}
+
 function ensureVideoRow(idx) {
   const list = el("videoList");
   if (!list) return null;
@@ -1270,7 +1432,7 @@ function ensureVideoRow(idx) {
   const url = document.createElement("input");
   url.type = "text";
   url.className = "videoUrl";
-  url.placeholder = "YouTube Link or File Input";
+  url.placeholder = "YouTube, Twitch VOD, or File";
   url.autocomplete = "off";
   row.appendChild(url);
 
@@ -1315,6 +1477,7 @@ function ensureVideoRow(idx) {
       try { file.value = ""; } catch { }
       block.dataset.hasFile = "0";
     }
+    checkTwitchConstraints();
     maybeAddNextRow();
   });
 
@@ -1327,6 +1490,7 @@ function ensureVideoRow(idx) {
     } else {
       block.dataset.hasFile = "0";
     }
+    checkTwitchConstraints();
     maybeAddNextRow();
   });
 
@@ -1457,9 +1621,16 @@ function collectSourcesFromUI() {
     if (f) {
       sources.push({ type: "file", file: f, startAt, name });
     } else if (rawUrl) {
-      const id = extractId(rawUrl);
-      if (id) sources.push({ type: "yt", id, startAt, name });
-      else sources.push({ type: "bad", raw: rawUrl, startAt, name });
+      // Check Twitch first (more distinctive URL pattern)
+      const twitchId = extractTwitchId(rawUrl);
+      if (twitchId) {
+        sources.push({ type: "twitch", videoId: twitchId, startAt, name });
+      } else {
+        // Fall back to YouTube
+        const id = extractId(rawUrl);
+        if (id) sources.push({ type: "yt", id, startAt, name });
+        else sources.push({ type: "bad", raw: rawUrl, startAt, name });
+      }
     }
   }
 
@@ -1482,7 +1653,9 @@ function loadVideos() {
     return;
   }
 
-  const realSources = sources.filter(s => s.type === "yt" || s.type === "file");
+  const realSources = sources.filter(s => s.type === "yt" || s.type === "file" || s.type === "twitch");
+
+
 
   if (realSources.some(s => s.type === "yt") && !apiReady) {
     setStatus("YouTube API not ready yet. Try again in a second.", true);
@@ -1736,6 +1909,15 @@ function loadVideos() {
               for (let k = 0; k < players.length; k++) {
                 if (!shouldParticipate(k, g)) continue;
 
+                const pk = players[k];
+
+                // Skip seeking Twitch players - just play them without forcing time sync
+                // Twitch seeking causes stutter due to its API latency
+                if (pk && pk.__type === "twitch") {
+                  safe(() => pk.playVideo());
+                  continue;
+                }
+
                 const { playable } = computeLocalTarget(k, g);
                 if (!playable) {
                   endedFlags[k] = true;
@@ -1784,6 +1966,148 @@ function loadVideos() {
       return;
     }
 
+    // Twitch VOD
+    if (src.type === "twitch") {
+      const holder = document.createElement("div");
+      holder.id = `twitch-${i}-${Date.now()}`;
+      // Make holder fill the entire playerWrap container
+      holder.style.position = "absolute";
+      holder.style.top = "0";
+      holder.style.left = "0";
+      holder.style.width = "100%";
+      holder.style.height = "100%";
+      wrap.appendChild(holder);
+
+      // Check controls setting (reusing the same checkbox as YT)
+      const showControls = el("ytControlsToggle")?.checked || false;
+
+      const twitchPlayer = new Twitch.Player(holder.id, {
+        width: "100%",
+        height: "100%",
+        video: src.videoId,
+        parent: ["127.0.0.1"],
+        autoplay: false,
+        muted: true,
+        controls: showControls
+      });
+
+      // Mark as muted by default
+      const card = cards[i];
+      if (card) card.classList.add("muted");
+
+      // Track if Twitch player is fully ready (to avoid spurious events during initialization)
+      // We use both a local variable and set __ready on the adapter for anyPlaying() checks
+
+      twitchPlayer.addEventListener(Twitch.Player.READY, () => {
+        setStatus(`Loaded ${totalCount} video(s).`, false);
+
+        // Style the iframe to fill the holder
+        // Only disable pointer events if controls are HIDDEN.
+        // If controls are shown, user needs to click play/pause/timeline.
+        const frame = holder.querySelector("iframe");
+        if (frame) {
+          frame.style.width = "100%";
+          frame.style.height = "100%";
+          if (!showControls) {
+            frame.style.pointerEvents = "none";
+          }
+        }
+
+        // Seek to start position (0 or user-specified offset)
+        const localStart = Math.max(0, Number(src.startAt) || 0);
+
+        // Helper to ensure player is paused - retries until confirmed
+        const ensurePausedAndReady = (retriesLeft = 5) => {
+          try {
+            twitchPlayer.pause();
+            twitchPlayer.seek(localStart);
+          } catch { }
+
+          // Check if player thinks it's paused
+          setTimeout(() => {
+            let isPaused = true;
+            try { isPaused = twitchPlayer.isPaused(); } catch { }
+
+            if (!isPaused && retriesLeft > 0) {
+              // Player still thinks it's playing - retry
+              try { twitchPlayer.pause(); } catch { }
+              ensurePausedAndReady(retriesLeft - 1);
+            } else {
+              // Player is paused (or we gave up) - mark as ready
+              if (players[i]) players[i].__ready = true;
+              afterAnyReady();
+            }
+          }, 200);
+        };
+
+        // Start the pause+ready sequence after initial delay
+        setTimeout(ensurePausedAndReady, 300);
+      });
+
+      twitchPlayer.addEventListener(Twitch.Player.PLAY, () => {
+        // Ignore events until adapter is fully ready (avoid spurious events during init)
+        if (!players[i] || !players[i].__ready) return;
+        if (syncing || inLockout()) return;
+
+        // Twitch PLAY: just play other videos without forcing a seek
+        // This avoids sync feedback loops since Twitch time reporting can be slightly off
+        beginLockout(700);
+
+        for (let k = 0; k < players.length; k++) {
+          const pk = players[k];
+          if (!pk) continue;
+          // Don't re-trigger this same player
+          if (pk.__type === "twitch" && pk.__twitch === twitchPlayer) continue;
+          safe(() => pk.playVideo());
+        }
+
+        setTimeout(updatePlayPauseLabel, 150);
+        showBarNow();
+      });
+
+      twitchPlayer.addEventListener(Twitch.Player.PAUSE, () => {
+        // Ignore events until adapter is fully ready (avoid spurious events during init)
+        if (!players[i] || !players[i].__ready) return;
+
+        // If this video is marked as ended (ignored), DON'T broadcast pause
+        if (endedFlags[i]) return;
+
+        if (syncing || inLockout()) return;
+
+        // Twitch PAUSE: just pause other videos without seeking
+        beginLockout(450);
+
+        for (let k = 0; k < players.length; k++) {
+          const pk = players[k];
+          if (!pk) continue;
+          if (pk.__type === "twitch" && pk.__twitch === twitchPlayer) continue;
+          safe(() => pk.pauseVideo());
+        }
+
+        setTimeout(updatePlayPauseLabel, 150);
+        showBarNow();
+      });
+
+      twitchPlayer.addEventListener(Twitch.Player.ENDED, () => {
+        const srcIdx = players.findIndex(p => p.__type === "twitch" && p.__twitch === twitchPlayer);
+        if (srcIdx >= 0) endedFlags[srcIdx] = true;
+        setTimeout(updatePlayPauseLabel, 150);
+        showBarNow();
+      });
+
+      // Twitch SEEK: Don't sync other players when Twitch seeks
+      // Since Twitch iframe has pointer-events disabled, user can't seek anyway
+      // This event may fire on initial load or during buffering
+      twitchPlayer.addEventListener(Twitch.Player.SEEK, () => {
+        // Just update UI, don't sync others
+        setTimeout(updatePlayPauseLabel, 150);
+        showBarNow();
+      });
+
+      players[i] = makeTwitchAdapter(twitchPlayer, holder);
+      return;
+    }
+
     // Local file
     const v = document.createElement("video");
     v.style.width = "100%";
@@ -1826,6 +2150,14 @@ function loadVideos() {
 
       for (let k = 0; k < players.length; k++) {
         if (!shouldParticipate(k, g)) continue;
+
+        const pk = players[k];
+
+        // Skip seeking Twitch players - just play them without forcing time sync
+        if (pk && pk.__type === "twitch") {
+          safe(() => pk.playVideo());
+          continue;
+        }
 
         const { playable } = computeLocalTarget(k, g);
         if (!playable) {
@@ -2232,9 +2564,10 @@ on("zenSeek", "change", () => {
   const g = (v / 1000) * dGlobal;
 
   const wasPlaying = anyPlaying();
-  seekAllToGlobal(g, 750);
-  if (wasPlaying) setTimeout(() => playAll(450), 80);
-  else setTimeout(() => pauseAll(450), 80);
+  // Use a longer lockout (2000ms) to ensure Twitch players have time to seek without sync fighting back
+  seekAllToGlobal(g, 2000);
+  if (wasPlaying) setTimeout(() => playAll(2000), 80);
+  else setTimeout(() => pauseAll(2000), 80);
 
   isZenSeeking = false;
   showBarNow();
@@ -2269,4 +2602,8 @@ on("layoutB", "click", () => {
 on("layoutC", "click", () => {
   currentLayoutOption = 'C';
   updateLayoutOptionsUI(currentFilledVideoCount);
+});
+
+on("threshold", "change", () => {
+  checkTwitchConstraints();
 });
