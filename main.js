@@ -11,6 +11,68 @@ ipcMain.handle("app:getVersion", () => app.getVersion());
 
 // Alias handler (fixes: "No handler registered for 'getVersion'")
 ipcMain.handle("getVersion", () => app.getVersion());
+
+// Feedback submission handler
+const FEEDBACK_URL = "https://script.google.com/macros/s/AKfycbxrKRvRALjFtaShQor9LZ8Co3EnQtefCYVHNWIRVAheZReS-Esx2FjMIE2wPDUH-IAtJw/exec";
+const FEEDBACK_KEY = "v0dr3v13w_fb_9Qk7mD2sLx8R4pT1nH6cW5yG0eZ3uJ";
+
+function postFeedback(payload, timeoutMs = 12000) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(payload);
+    const urlObj = new URL(FEEDBACK_URL);
+
+    const options = {
+      hostname: urlObj.hostname,
+      port: 443,
+      path: urlObj.pathname + urlObj.search,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(data)
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let body = "";
+      res.on("data", chunk => body += chunk);
+      res.on("end", () => {
+        // Apps Script returns 302 redirect on success, or 200
+        if (res.statusCode === 200 || res.statusCode === 302) {
+          resolve(body);
+        } else {
+          reject(new Error(`HTTP ${res.statusCode}`));
+        }
+      });
+    });
+
+    req.on("error", reject);
+    req.setTimeout(timeoutMs, () => {
+      req.destroy();
+      reject(new Error("Request timed out"));
+    });
+
+    req.write(data);
+    req.end();
+  });
+}
+
+ipcMain.handle("feedback:submit", async (_event, { message }) => {
+  const platform = process.platform === "win32" ? "Windows"
+    : process.platform === "darwin" ? "macOS"
+      : "Linux";
+
+  const payload = {
+    key: FEEDBACK_KEY,
+    message: message || "",
+    appVersion: app.getVersion(),
+    platform,
+    timestamp: new Date().toISOString()
+  };
+
+  await postFeedback(payload);
+  return { success: true };
+});
+
 function sanitizeFilename(name) {
   return String(name || "installer.exe").replace(/[<>:"/\\|?*\x00-\x1F]/g, "_");
 }

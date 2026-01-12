@@ -729,6 +729,7 @@
 
       <button id="keybindsBtn">Keybinds</button>
       <button id="checkUpdateBtn">Check for Updates</button>
+      <button id="feedbackBtn">Improve This App</button>
 
       <!-- status area (top bar stripped down) -->
       <span class="status">
@@ -831,6 +832,23 @@
           <div class="kbAction">Toggle Draw</div>
           <button class="kbEdit" data-action="draw">Edit</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Feedback Modal -->
+  <div id="feedbackModal" class="modalBackdrop">
+    <div class="modalPanel" style="width:65vw;height:60vh;padding:30px 36px;display:flex;flex-direction:column;">
+      <button class="modalClose" id="feedbackClose">&times;</button>
+      <h3 style="margin:0 0 12px 0;font-size:20px;flex-shrink:0;">Help me improve this app</h3>
+      <p style="margin:0 0 16px 0;font-size:14px;color:#aaa;flex-shrink:0;line-height:1.5;">I want to hear from you!
+        What do you want this app to be able to do? I will do my best to incorporate your ideas. I hope you are enjoying
+        this app so far. I have a lot of plans for the future, but I want to know what you want.</p>
+      <textarea id="feedbackText" placeholder="Describe a bug or improvement..."
+        style="flex:1;width:100%;resize:none;background:#111;color:#eee;border:1px solid #333;border-radius:10px;padding:14px;font-size:14px;font-family:inherit;"></textarea>
+      <div style="margin-top:16px;display:flex;gap:10px;align-items:center;flex-shrink:0;">
+        <span id="feedbackStatus" style="flex:1;font-size:13px;color:#aaa;"></span>
+        <button id="feedbackSubmit" disabled style="padding:10px;font-size:14px;">Submit</button>
       </div>
     </div>
   </div>

@@ -2752,3 +2752,43 @@ on("layoutC", "click", () => {
 on("threshold", "change", () => {
   checkTwitchConstraints();
 });
+
+// --------------- Feedback Modal ---------------
+on("feedbackBtn", "click", () => {
+  el("feedbackModal").classList.add("open");
+  el("feedbackText").value = "";
+  el("feedbackStatus").textContent = "";
+  el("feedbackSubmit").disabled = true;
+});
+
+on("feedbackClose", "click", () => {
+  el("feedbackModal").classList.remove("open");
+});
+
+// Close on backdrop click
+el("feedbackModal")?.addEventListener("click", (e) => {
+  if (e.target.id === "feedbackModal") {
+    el("feedbackModal").classList.remove("open");
+  }
+});
+
+on("feedbackText", "input", () => {
+  el("feedbackSubmit").disabled = !el("feedbackText").value.trim();
+});
+
+on("feedbackSubmit", "click", async () => {
+  const msg = el("feedbackText").value.trim();
+  if (!msg) return;
+
+  el("feedbackSubmit").disabled = true;
+  el("feedbackStatus").textContent = "Sending…";
+
+  try {
+    await ipcRenderer.invoke("feedback:submit", { message: msg });
+    el("feedbackStatus").textContent = "Sent. Thank you for helping me improve this app!";
+    setTimeout(() => el("feedbackModal").classList.remove("open"), 1500);
+  } catch (err) {
+    el("feedbackStatus").textContent = "Failed to send. Try again.";
+    el("feedbackSubmit").disabled = false;
+  }
+});
