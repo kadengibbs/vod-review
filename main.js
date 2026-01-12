@@ -175,7 +175,8 @@ async function createWindow() {
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false
-    }
+    },
+    icon: path.join(__dirname, "icon.ico")
   });
 
   win.loadURL(`http://127.0.0.1:${serverHandle.port}/index.html`);
