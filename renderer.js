@@ -59,9 +59,9 @@ const LAYOUT_CONFIGS = {
     B: [{ count: 1, centered: false }, { count: 1, centered: false }]
   },
   3: {
-    A: [{ count: 3, centered: false }],
-    B: [{ count: 1, centered: true }, { count: 2, centered: false }],
-    C: [{ count: 2, centered: false }, { count: 1, centered: true }]
+    A: [{ count: 1, centered: true }, { count: 2, centered: false }],
+    B: [{ count: 2, centered: false }, { count: 1, centered: true }],
+    C: [{ count: 3, centered: false }]
   },
   4: { A: [{ count: 2, centered: false }, { count: 2, centered: false }] },
   5: {
@@ -485,8 +485,8 @@ function getMaxGlobalEnd() {
 
 /* ---------- Core actions ---------- */
 
-function playAll(lockoutMs = 450) {
-  const gCur = getMedianGlobalTime();
+function playAll(lockoutMs = 450, forceTime = null) {
+  const gCur = (forceTime !== null) ? forceTime : getMedianGlobalTime();
   broadcast(p => safe(() => p.playVideo()), lockoutMs, gCur);
 }
 
@@ -534,12 +534,6 @@ function toggleMuteSelectMode() {
     } else {
       delete card.dataset.muteClickable;
     }
-  });
-
-  // Disable/Enable volume sliders
-  const sliders = document.querySelectorAll(".volSlider");
-  sliders.forEach(s => {
-    s.disabled = muteSelectMode;
   });
 }
 
@@ -742,16 +736,14 @@ document.addEventListener("click", (e) => {
 /* ---------- Draw mode ---------- */
 
 const DRAW_COLORS = [
-  { name: "gray", hex: "#808080" },
-  { name: "black", hex: "#1a1a1a" },
   { name: "white", hex: "#ffffff" },
-  { name: "yellow", hex: "#ffeb3b" },
-  { name: "orange", hex: "#ff9800" },
-  { name: "red", hex: "#f44336" },
-  { name: "pink", hex: "#e91e63" },
-  { name: "purple", hex: "#9c27b0" },
-  { name: "blue", hex: "#2196f3" },
-  { name: "green", hex: "#4caf50" }
+  { name: "red", hex: "#ff0000" },
+  { name: "orange", hex: "#ff7f00" },
+  { name: "yellow", hex: "#ffFF00" },
+  { name: "green", hex: "#00ff00" },
+  { name: "blue", hex: "#0000ff" },
+  { name: "indigo", hex: "#4b0082" },
+  { name: "violet", hex: "#9400d3" }
 ];
 
 function createDrawCanvas() {
@@ -950,6 +942,54 @@ function createColorSelector() {
 
     bar.appendChild(btn);
   });
+
+
+
+  // Helper to create action buttons
+  const makeActionBtn = (title, iconPath, onClick) => {
+    const btn = document.createElement("button");
+    btn.title = title;
+    btn.style.cssText = `
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: none;
+      background: #333;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.1s, background 0.1s;
+    `;
+    btn.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="white"><path d="${iconPath}"/></svg>`;
+
+    btn.addEventListener("click", onClick);
+    btn.addEventListener("mouseenter", () => {
+      btn.style.transform = "scale(1.15)";
+      btn.style.background = "#555";
+    });
+    btn.addEventListener("mouseleave", () => {
+      btn.style.transform = "scale(1)";
+      btn.style.background = "#333";
+    });
+
+    bar.appendChild(btn);
+  };
+
+  // Undo Button
+  makeActionBtn("Undo", "M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z", undoDraw);
+
+  // Redo Button
+  makeActionBtn("Redo", "M18.4 10.6C16.55 9 14.15 8 11.5 8c-4.65 0-8.58 3.03-9.96 7.22L3.9 16c1.05-3.19 4.05-5.5 7.6-5.5 1.95 0 3.73.72 5.12 1.88L13 16h9V7l-3.6 3.6z", redoDraw);
+
+  // Clear All Button - Trash can icon
+  const clearDraw = () => {
+    if (!drawCanvas || !drawCtx) return;
+    drawHistory.push(drawCanvas.toDataURL());
+    redoHistory = [];
+    drawCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+  };
+  makeActionBtn("Clear", "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z", clearDraw);
 
   document.body.appendChild(bar);
 }
@@ -1444,7 +1484,7 @@ function ensureVideoRow(idx) {
 
   const file = document.createElement("input");
   file.type = "file";
-  file.accept = "video/*";
+  file.accept = ""; // Allow all files
   file.className = "videoFile";
   file.style.display = "none";
 
@@ -1470,13 +1510,12 @@ function ensureVideoRow(idx) {
 
   block.appendChild(row);
 
-  // Events: if user types a YT link, clear file
+  // Events: if user types in the box (or clears it), clear any selected file
   url.addEventListener("input", () => {
-    if (url.value.trim()) {
-      // If they type a URL, prefer it and clear any selected file
-      try { file.value = ""; } catch { }
-      block.dataset.hasFile = "0";
-    }
+    // Always clear the file input if the user is modifying the text manually
+    try { file.value = ""; } catch { }
+    block.dataset.hasFile = "0";
+
     checkTwitchConstraints();
     maybeAddNextRow();
   });
@@ -1509,9 +1548,81 @@ function rowIsFilled(block) {
   return hasFile || hasUrl;
 }
 
+const compactVideoRows = () => {
+  const list = el("videoList");
+  if (!list) return;
+
+  const blocks = Array.from(list.querySelectorAll(".videoBlock"));
+  const filled = [];
+  const empty = [];
+
+  // Separate filled and empty blocks
+  blocks.forEach(block => {
+    if (rowIsFilled(block)) filled.push(block);
+    else empty.push(block);
+  });
+
+  // Map original indices to detect movement
+  const oldIndexMap = new Map();
+  blocks.forEach((b, i) => oldIndexMap.set(b, i));
+
+  // Reorder DOM: all filled first, then all empty
+  // Check if order is already correct to avoid unnecessary DOM thrashing and focus loss
+  const sortedBlocks = [...filled, ...empty];
+  let orderChanged = false;
+  if (blocks.length === sortedBlocks.length) {
+    for (let i = 0; i < blocks.length; i++) {
+      if (blocks[i] !== sortedBlocks[i]) {
+        orderChanged = true;
+        break;
+      }
+    }
+  } else {
+    orderChanged = true;
+  }
+
+  if (orderChanged) {
+    filled.forEach(b => list.appendChild(b));
+    // For empty blocks that are being moved 'down' (to a higher index), clear their data
+    // This solves the bug where deleting Row 1 moves Row 1's metadata to the 'new' Row 2 (which is physically the old Row 0)
+    empty.forEach((b, i) => {
+      list.appendChild(b);
+      // Calculate new index for this empty block
+      const newIndex = filled.length + i;
+      const oldIndex = oldIndexMap.get(b);
+
+      if (newIndex > oldIndex) {
+        // Row moved down (was a gap) -> Clear metadata
+        const st = b.querySelector(".startTime");
+        const vn = b.querySelector(".videoNameInput");
+        if (st) st.value = "";
+        if (vn) vn.value = "";
+
+        // Also ensure URL/File are clean (though they should be empty to be here)
+        const u = b.querySelector(".videoUrl");
+        const f = b.querySelector(".videoFile");
+        if (u) u.value = "";
+        if (f) f.value = "";
+        b.dataset.hasFile = "0";
+      }
+    });
+  }
+
+  // Update indices and labels
+  const allBlocks = [...filled, ...empty];
+  allBlocks.forEach((block, index) => {
+    block.dataset.idx = String(index);
+    const title = block.querySelector(".videoTitle");
+    if (title) title.textContent = `Video ${index + 1}`;
+  });
+};
+
 function maybeAddNextRow() {
   const list = el("videoList");
   if (!list) return;
+
+  // First, compact any gaps (e.g. if Video 1 was deleted but Video 2 exists)
+  compactVideoRows();
 
   const blocks = Array.from(list.querySelectorAll(".videoBlock"));
 
@@ -1687,6 +1798,14 @@ function loadVideos() {
   holders = [];
   if (el("grid")) el("grid").innerHTML = "";
   cleanupObjectUrls();
+
+  // Conditionally hide speed control if Twitch is present (Twitch doesn't allow speed control)
+  const zSpeed = el("zSpeed");
+  if (zSpeed) {
+    zSpeed.value = "1"; // Reset to 1x on new load
+    const hasTwitch = realSources.some(s => s.type === "twitch");
+    zSpeed.style.display = hasTwitch ? "none" : "";
+  }
 
   // Get layout configuration for this video count
   const layoutConfig = LAYOUT_CONFIGS[totalCount]?.[currentLayoutOption] ||
@@ -2269,6 +2388,7 @@ function loadVideos() {
 }
 
 /* Initialize the dynamic setup list on first load */
+ipcRenderer.send("app:setKeybindsArmed", false);
 initVideoSetupUI();
 
 /* ---------- Update checking ---------- */
@@ -2472,11 +2592,13 @@ on("zSync", "click", () => { syncNow(); showBarNow(); });
 
 on("zSpeed", "change", () => {
   const z = el("zSpeed");
-  const top = el("speedSelect");
-  if (z && top) {
-    top.value = z.value;
-    top.dispatchEvent(new Event("change"));
-  }
+  if (!z) return;
+
+  const rate = Number(z.value) || 1;
+  const gCur = getMedianGlobalTime();
+
+  // Apply to all players
+  broadcast(p => safe(() => p.setPlaybackRate(rate)), 300, gCur);
   showBarNow();
 });
 
@@ -2494,6 +2616,10 @@ on("zSettings", "click", () => {
   if (muteSelectMode) {
     muteSelectMode = false;
     document.body.classList.remove("muteSelectMode");
+  }
+  // Also exit draw mode
+  if (drawMode) {
+    toggleDrawMode();
   }
   toggleZenMode();
 });
@@ -2566,7 +2692,7 @@ on("zenSeek", "change", () => {
   const wasPlaying = anyPlaying();
   // Use a longer lockout (2000ms) to ensure Twitch players have time to seek without sync fighting back
   seekAllToGlobal(g, 2000);
-  if (wasPlaying) setTimeout(() => playAll(2000), 80);
+  if (wasPlaying) setTimeout(() => playAll(2500, g), 80);
   else setTimeout(() => pauseAll(2000), 80);
 
   isZenSeeking = false;
@@ -2575,7 +2701,26 @@ on("zenSeek", "change", () => {
 
 // Keyboard + resize
 window.addEventListener("keydown", e => {
-  if (e.key === "Escape") toggleZenMode();
+  if (e.key === "Escape") {
+    // Exit all interactive modes
+    if (muteSelectMode) {
+      muteSelectMode = false;
+      document.body.classList.remove("muteSelectMode");
+    }
+    if (focusMode) {
+      toggleFocusMode();
+    }
+    if (drawMode) {
+      toggleDrawMode();
+    }
+    if (document.body.classList.contains("zen")) {
+      toggleZenMode();
+    }
+
+    // Disable keybinds until Load is pressed again
+    keybindsArmed = false;
+    ipcRenderer.send("app:setKeybindsArmed", false);
+  }
 });
 window.addEventListener("resize", () => {
   updateTileHeight();

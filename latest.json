@@ -1,5 +1,5 @@
 {
-  "version": "1.1.0",
-  "url": "https://github.com/kadengibbs/vod-review/releases/download/v1.1.0/VOD.Review.Setup.1.1.0.exe",
-  "notes": "Added twitch VOD support"
+  "version": "1.1.1",
+  "url": "https://github.com/kadengibbs/vod-review/releases/download/v1.1.1/VOD.Review.Setup.1.1.1.exe",
+  "notes": "Significant bug fixes and improvements"
 }

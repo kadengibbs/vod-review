@@ -413,6 +413,13 @@
       pointer-events: none;
     }
 
+    /* Disable volume slider in selection modes */
+    body.muteSelectMode .volSlider,
+    body.focusSelectMode .volSlider {
+      pointer-events: none;
+      opacity: 0.3;
+    }
+
     /* Draw mode - block all video interaction */
     body.drawMode .card video,
     body.drawMode .card iframe {
