@@ -1,5 +1,8 @@
 const { app, BrowserWindow, ipcMain } = require("electron");
 const fs = require("fs");
+if (process.platform === 'win32') {
+  app.setAppUserModelId("com.vodreview.app");
+}
 const https = require("https");
 const { URL } = require("url");
 const { spawn } = require("child_process");

@@ -931,10 +931,25 @@ function createColorSelector() {
 
     btn.addEventListener("click", () => {
       drawColor = color.hex;
-      if (drawCtx) drawCtx.strokeStyle = drawColor;
+      if (drawCtx) {
+        drawCtx.strokeStyle = drawColor;
+      }
+      // Re-enable pointer events on canvas
+      if (drawCanvas) {
+        drawCanvas.style.pointerEvents = "auto";
+        drawCanvas.style.cursor = "crosshair";
+      }
+
       document.querySelectorAll(".drawColorBtn").forEach(b => {
         b.style.borderColor = b.dataset.color === drawColor ? "#fff" : "transparent";
       });
+      // De-select mouse tool
+      const mouseBtn = document.getElementById("drawToolMouse");
+      if (mouseBtn) {
+        mouseBtn.style.background = "#333";
+        mouseBtn.style.border = "none";
+      }
+      document.body.classList.remove("drawMouseActive"); // <--- REMOVE CLASS
     });
 
     btn.addEventListener("mouseenter", () => { btn.style.transform = "scale(1.15)"; });
@@ -943,6 +958,53 @@ function createColorSelector() {
     bar.appendChild(btn);
   });
 
+  // --- Mouse Tool (Interact) ---
+  const mouseBtn = document.createElement("button");
+  mouseBtn.id = "drawToolMouse";
+  mouseBtn.title = "Interact";
+  mouseBtn.style.cssText = `
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: none;
+    background: #333;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.1s, background 0.1s;
+  `;
+  // Simple mouse pointer icon
+  mouseBtn.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="white"><path d="M7 2l12 11.2-5.8.5 3.3 7.3-2.2.9-3.2-7.4-4.4 4V2z"/></svg>`;
+
+  mouseBtn.addEventListener("click", () => {
+    // Disable pointer events on canvas so clicks pass through
+    if (drawCanvas) {
+      drawCanvas.style.pointerEvents = "none";
+      drawCanvas.style.cursor = "default";
+    }
+    // Visual feedback: clear color selections
+    document.querySelectorAll(".drawColorBtn").forEach(b => {
+      b.style.borderColor = "transparent";
+    });
+    // Highlight this button
+    mouseBtn.style.background = "#555";
+    mouseBtn.style.border = "2px solid #fff";
+
+    document.body.classList.add("drawMouseActive"); // <--- ADD CLASS
+  });
+
+  mouseBtn.addEventListener("mouseenter", () => {
+    // Only hover effect if not active? or always. active state usually managed by click
+    if (mouseBtn.style.border !== "2px solid rgb(255, 255, 255)") { // naive check
+      mouseBtn.style.transform = "scale(1.15)";
+    }
+  });
+  mouseBtn.addEventListener("mouseleave", () => {
+    mouseBtn.style.transform = "scale(1)";
+  });
+
+  bar.appendChild(mouseBtn);
 
 
   // Helper to create action buttons
@@ -1002,6 +1064,7 @@ function removeColorSelector() {
 function toggleDrawMode() {
   drawMode = !drawMode;
   document.body.classList.toggle("drawMode", drawMode);
+  document.body.classList.remove("drawMouseActive"); // <--- RESET ON TOGGLE
 
   if (drawMode) {
     pauseAll(100);
@@ -2345,6 +2408,12 @@ function loadVideos() {
       setTimeout(updatePlayPauseLabel, 150);
       showBarNow();
     };
+
+    // Toggle play/pause on click
+    v.addEventListener("click", () => {
+      if (v.paused) v.play();
+      else v.pause();
+    });
 
     v.addEventListener("play", onPlay);
     v.addEventListener("pause", onPause);
