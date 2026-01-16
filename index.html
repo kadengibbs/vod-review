@@ -23,6 +23,16 @@
       /* unified control sizing */
       --controlH: 46px;
       --controlInnerH: 32px;
+
+      --active-gradient: linear-gradient(135deg, #ff512f, #dd2476);
+    }
+
+    .dev-only {
+      display: none !important;
+    }
+
+    body.dev-mode .dev-only {
+      display: inline-flex !important;
     }
 
     * {
@@ -45,6 +55,23 @@
       border: 1px solid var(--border);
       border-radius: 10px;
       font-size: 14px;
+    }
+
+    /* Global Focus Reset & Gradient Border */
+    input:not([type="range"]):focus,
+    select:focus,
+    button:focus,
+    textarea:focus {
+      outline: none;
+      border: 1px solid transparent !important;
+      background-image: linear-gradient(#111, #111), var(--active-gradient) !important;
+      background-origin: border-box !important;
+      background-clip: padding-box, border-box !important;
+    }
+
+    /* Range inputs should not have the box border */
+    input[type="range"] {
+      border: none;
     }
 
     button {
@@ -95,6 +122,13 @@
       font-size: 14px;
     }
 
+    .chip:focus-within {
+      border: 1px solid transparent !important;
+      background-image: linear-gradient(#111, #111), var(--active-gradient) !important;
+      background-origin: border-box !important;
+      background-clip: padding-box, border-box !important;
+    }
+
     .chip label {
       height: 100%;
       display: inline-flex;
@@ -114,6 +148,12 @@
       text-align: center;
       -moz-appearance: textfield;
       appearance: textfield;
+    }
+
+    /* Override for number input inside chip to avoid double border or broken style */
+    .chip input[type="number"]:focus {
+      background-image: none !important;
+      border: none !important;
     }
 
     /* Make integer inputs narrower */
@@ -152,6 +192,15 @@
       gap: 2px;
       justify-content: center;
       align-items: center;
+    }
+
+    /* Layout buttons handle their own active state border, so we might want to override focus or let it be */
+    .layoutBtn:focus {
+      background-image: none !important;
+      border: 1px solid transparent;
+      /* let the custom focus logic take over or just hide standard focus */
+      /* If we want the gradient on these too: */
+      background-image: linear-gradient(transparent, transparent), var(--active-gradient) !important;
     }
 
     .layoutBtn.active {
@@ -232,9 +281,23 @@
 
     .videoRow {
       display: grid;
-      grid-template-columns: 1fr auto 160px 200px;
+      grid-template-columns: 1fr auto 170px 200px;
       gap: 12px;
-      align-items: center;
+      align-items: end;
+    }
+
+    .inputGroup {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      width: 100%;
+    }
+
+    .fieldLabel {
+      font-size: 18px;
+      opacity: 0.95;
+      padding-left: 2px;
+      margin-bottom: 2px;
     }
 
     .videoRow input[type="text"] {
@@ -246,6 +309,15 @@
       height: 46px;
     }
 
+    .videoRow input[type="text"]:focus {
+      background-image: linear-gradient(#3a3a3a, #3a3a3a), var(--active-gradient) !important;
+    }
+
+    .videoRow input[type="text"].error {
+      border: 1px solid #ff0000;
+      box-shadow: 0 0 0 1px #ff0000;
+    }
+
     .videoRow .browseBtn {
       padding: 0 14px;
       height: 46px;
@@ -253,12 +325,75 @@
       background: #3a3a3a;
     }
 
-    .videoRow .startTime {
+    .videoRow .browseBtn:focus {
+      background-image: linear-gradient(#3a3a3a, #3a3a3a), var(--active-gradient) !important;
+    }
+
+    .videoRow .startTimeContainer.error {
+      border: 1px solid #ff0000;
+      box-shadow: 0 0 0 1px #ff0000;
+    }
+
+    .videoRow .startTimeContainer {
+      display: flex;
+      align-items: center;
+      gap: 0px;
       width: 100%;
-      border-radius: 12px;
-      padding: 10px 12px;
-      background: #2a2a2a;
       height: 46px;
+      background: #3a3a3a;
+      border: 1px solid #2a2a2a;
+      /* Explicit border to be replaced */
+      border-radius: 12px;
+      padding: 0 0px;
+      /* slight padding for the edges */
+    }
+
+    .videoRow .startTimeContainer:focus-within {
+      border: 1px solid transparent !important;
+      background-image: linear-gradient(#3a3a3a, #3a3a3a), var(--active-gradient) !important;
+      background-origin: border-box;
+      background-clip: padding-box, border-box;
+    }
+
+    .videoRow input.startTimeBox {
+      flex: 1;
+      min-width: 0;
+      /* allows shrinking */
+      /* allows shrinking */
+      background: transparent !important;
+      border: none !important;
+      outline: none;
+      box-shadow: none;
+      color: #eee;
+      text-align: center;
+      font-size: 14px;
+      height: 100%;
+      padding: 0 0 2px 0 !important;
+      /* Move text up slightly */
+      /* Remove spinner buttons */
+      -moz-appearance: textfield;
+      appearance: textfield;
+    }
+
+    /* Remove border from inner inputs when container is focused */
+    .videoRow input.startTimeBox:focus {
+      border: none !important;
+      background-image: none !important;
+      box-shadow: none !important;
+    }
+
+    .videoRow input.startTimeBox::-webkit-outer-spin-button,
+    .videoRow input.startTimeBox::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+
+    .startTimeSep {
+      color: #888;
+      font-weight: bold;
+      user-select: none;
+      padding-bottom: 5px;
+      /* Fix vertical alignment */
     }
 
     .videoRow .videoNameInput {
@@ -267,6 +402,14 @@
       padding: 10px 12px;
       background: #2a2a2a;
       height: 46px;
+      border: 1px solid #2a2a2a;
+    }
+
+    .videoRow .videoNameInput:focus {
+      border: 1px solid transparent !important;
+      background-image: linear-gradient(#2a2a2a, #2a2a2a), var(--active-gradient) !important;
+      background-origin: border-box !important;
+      background-clip: padding-box, border-box !important;
     }
 
     .videoHeader {
@@ -339,6 +482,11 @@
     .volSlider:disabled {
       opacity: 0.3;
       cursor: not-allowed;
+    }
+
+    .volSlider:focus {
+      outline: none;
+      /* Just remove outline, let JS handle background */
     }
 
     .videoHint {
@@ -472,6 +620,8 @@
       position: relative;
       display: flex;
       flex-direction: column;
+      user-select: none;
+      /* Prevent double-click selection */
     }
 
     .playerWrap {
@@ -593,6 +743,15 @@
     }
 
     /* --- Keybinds modal (Discord-like window) --- */
+    /* Remove gradient focus from Zen Bar controls */
+    .zenBar input:focus,
+    .zenBar select:focus,
+    .zenBar button:focus {
+      background-image: none !important;
+      border: 1px solid var(--border) !important;
+      background-clip: border-box !important;
+    }
+
     .modalBackdrop {
       position: fixed;
       inset: 0;
@@ -628,42 +787,97 @@
       color: #fff;
       font-size: 28px;
       line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+
+    .modalReset {
+      position: absolute;
+      top: 14px;
+      right: 60px;
+      /* 14px + 40px + 6px gap */
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      background: transparent;
+      border: none;
+      color: #aaa;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: color 0.1s;
+    }
+
+    .modalReset:hover {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .modalClose:hover {
+      background: rgba(255, 255, 255, 0.08);
     }
 
     .kbGrid {
       display: grid;
-      gap: 16px;
+      grid-template-columns: 70px max-content 80px;
+      gap: 8px 12px;
       padding-top: 10px;
+      justify-content: center;
     }
 
     .kbRow {
-      display: grid;
-      grid-template-columns: 90px 170px 120px;
-      gap: 18px;
-      align-items: center;
+      display: contents;
     }
 
 
-    .kbKey,
-    .kbAction {
-      background: #2c2c2c;
-      border: 1px solid #1f1f1f;
-      border-radius: 12px;
-      height: 64px;
+
+
+    .kbKey {
+      background: #111;
+      border: 1px solid #333;
+      border-radius: 8px;
+      height: 42px;
       display: flex;
       align-items: center;
       justify-content: center;
-      color: #fff;
+      color: #eee;
+      font-size: 18px;
+      font-weight: 600;
+      /* font-family: monospace; removed to match global font */
+    }
+
+    .kbAction {
+      background: #111;
+      border: 1px solid #333;
+      border-radius: 8px;
+      height: 42px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #eee;
+      font-size: 15px;
+      font-weight: 500;
+      text-align: center;
+      padding: 0 16px;
     }
 
     .kbEdit {
-      background: #2c2c2c;
-      border: 1px solid #1f1f1f;
-      border-radius: 12px;
-      height: 64px;
-      color: #fff;
-      font-size: 28px;
+      background: #111;
+      border: 1px solid #333;
+      border-radius: 8px;
+      height: 42px;
+      color: #eee;
+      font-size: 15px;
       font-weight: 500;
+      transition: all 0.1s;
+    }
+
+    .kbEdit:hover {
+      border-color: #555;
+      color: #fff;
     }
 
     .kbRow.editing .kbEdit {
@@ -679,22 +893,14 @@
     }
 
 
-    .kbKey {
-      font-size: 28px;
-      font-weight: 700;
-    }
 
-    .kbAction {
-      font-size: 24px;
-      font-weight: 500;
-      text-align: center;
-      line-height: 1.05;
-    }
+
+
 
     /* small screens */
     @media (max-width: 900px) {
       .videoRow {
-        grid-template-columns: 1fr auto 130px 140px;
+        grid-template-columns: 1fr auto 160px 140px;
       }
 
       .chip input[type="number"] {
@@ -724,7 +930,7 @@
         <input id="threshold" type="number" step="0.05" value="0.25" title="Auto-correct drift threshold (seconds)">
       </div>
 
-      <div class="chip">
+      <div class="chip dev-only">
         <label>
           <input type="checkbox" id="ytControlsToggle">
           YouTube Controls
@@ -735,7 +941,7 @@
 
       <button id="keybindsBtn">Keybinds</button>
       <button id="feedbackBtn">Improve This App</button>
-      <button id="checkUpdateBtn">Check for Updates</button>
+
 
       <!-- status area (top bar stripped down) -->
       <span class="status">
@@ -748,7 +954,7 @@
       <div id="videoList" class="videoList"></div>
       <div class="videoHint">Paste a YouTube, Twitch VOD link/ID, or use Browse. A new video row appears automatically
         once you fill
-        one up to six videos.</div>
+        one, up to six videos.</div>
     </div>
 
     <div class="grid" id="grid"></div>
@@ -787,8 +993,22 @@
 
   <!-- Keybinds modal -->
   <div id="keybindsModal" class="modalBackdrop">
-    <div class="modalPanel">
-      <button id="keybindsClose" class="modalClose" aria-label="Close">×</button>
+    <div class="modalPanel" style="width: fit-content; max-width: 90vw;">
+      <button id="keybindsReset" class="modalReset" aria-label="Reset to defaults" title="Reset to defaults">
+        <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"
+          stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+          <path d="M3 3v5h5"></path>
+        </svg>
+      </button>
+      <button id="keybindsClose" class="modalClose" aria-label="Close">
+        <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"
+          stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+      <h3 style="margin:0 0 20px 0;font-size:20px;">Keybinds</h3>
 
       <div class="kbGrid">
         <div class="kbRow" data-action="rew30">
@@ -845,7 +1065,13 @@
   <!-- Feedback Modal -->
   <div id="feedbackModal" class="modalBackdrop">
     <div class="modalPanel" style="width:65vw;height:60vh;padding:30px 36px;display:flex;flex-direction:column;">
-      <button class="modalClose" id="feedbackClose">&times;</button>
+      <button class="modalClose" id="feedbackClose">
+        <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"
+          stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
       <h3 style="margin:0 0 12px 0;font-size:20px;flex-shrink:0;">Help me improve this app</h3>
       <p style="margin:0 0 16px 0;font-size:14px;color:#aaa;flex-shrink:0;line-height:1.5;">I want to hear from you!
         What do you want this app to be able to do? I will do my best to incorporate your ideas. I hope you are enjoying

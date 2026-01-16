@@ -1,15 +1,17 @@
 {
   "name": "vod-review",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "description": "Multi-video YouTube VOD review and sync tool",
   "main": "main.js",
   "author": "Kaden Gibbs",
   "license": "MIT",
   "scripts": {
     "start": "npx electron .",
+    "start:dev": "cross-env DEV_UI=1 electron .",
     "build": "electron-builder"
   },
   "devDependencies": {
+    "cross-env": "^10.1.0",
     "electron": "^30.0.0",
     "electron-builder": "^24.13.3"
   },

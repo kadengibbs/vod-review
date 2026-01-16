@@ -211,7 +211,12 @@ function saveKeybinds() {
 function renderKeybindsUi() {
   const set = (id, val) => {
     const n = el(id);
-    if (n) n.textContent = String(val || "").toUpperCase();
+    if (n) {
+      let v = String(val || "").toUpperCase();
+      if (v === " " || v === "") v = "SPACE"; // also handle empty if needed, but per request " " -> "SPACE"
+      if (v.trim() === "" && v.length > 0) v = "SPACE"; // catch-all for whitespace-only if not empty
+      n.textContent = v;
+    }
   };
   set("kb_key_rew30", keybinds.rew30);
   set("kb_key_rew5", keybinds.rew5);
@@ -227,7 +232,15 @@ function setEditing(actionOrNull) {
   editingAction = actionOrNull;
 
   document.querySelectorAll(".kbRow").forEach(r => {
-    r.classList.toggle("editing", r.getAttribute("data-action") === editingAction);
+    const action = r.getAttribute("data-action");
+    const isEditing = action === editingAction;
+    r.classList.toggle("editing", isEditing);
+
+    // Update button text
+    const btn = r.querySelector(".kbEdit");
+    if (btn) {
+      btn.textContent = isEditing ? "Cancel" : "Edit";
+    }
   });
 }
 
@@ -253,8 +266,7 @@ ipcRenderer.on("app:customKeybind", (_evt, action) => {
   }
 });
 
-// Where the app checks for update info (host this on GitHub Pages)
-const UPDATE_MANIFEST_URL = "https://kadengibbs.github.io/vod-review/latest.json";
+
 let currentAppVersion = null;
 
 
@@ -1523,21 +1535,32 @@ function ensureVideoRow(idx) {
   block.className = "videoBlock";
   block.dataset.idx = String(idx);
 
+  /* REMOVED video title block
   const title = document.createElement("div");
   title.className = "videoTitle";
   title.textContent = `Video ${idx + 1}`;
   block.appendChild(title);
+  */
 
   const row = document.createElement("div");
   row.className = "videoRow";
 
   // URL / ID input
+  const urlGroup = document.createElement("div");
+  urlGroup.className = "inputGroup";
+
+  const urlLabel = document.createElement("div");
+  urlLabel.className = "fieldLabel";
+  urlLabel.textContent = `Video ${idx + 1}`;
+  urlGroup.appendChild(urlLabel);
+
   const url = document.createElement("input");
   url.type = "text";
   url.className = "videoUrl";
   url.placeholder = "YouTube, Twitch VOD, or File";
   url.autocomplete = "off";
-  row.appendChild(url);
+  urlGroup.appendChild(url);
+  row.appendChild(urlGroup);
 
   // browse button + hidden file input
   const browseBtn = document.createElement("button");
@@ -1556,20 +1579,77 @@ function ensureVideoRow(idx) {
   row.appendChild(file);
 
   // Start time
-  const st = document.createElement("input");
-  st.type = "text";
-  st.className = "startTime";
-  st.placeholder = formatStartPlaceholder();
-  st.autocomplete = "off";
-  row.appendChild(st);
+  const stGroup = document.createElement("div");
+  stGroup.className = "inputGroup";
+
+  const stLabel = document.createElement("div");
+  stLabel.className = "fieldLabel";
+  stLabel.textContent = "Start Time";
+  stGroup.appendChild(stLabel);
+
+  const stContainer = document.createElement("div");
+  stContainer.className = "startTimeContainer";
+
+  const makeTimeInput = (cls, placeholder) => {
+    const inp = document.createElement("input");
+    inp.type = "text"; // Use text to avoid spinner weirdness, but we can enforce numbers if needed
+    inp.inputMode = "numeric";
+    inp.maxLength = 2; // Limit to 2 chars
+    inp.className = cls + " startTimeBox";
+    inp.placeholder = placeholder;
+    inp.autocomplete = "off";
+
+    // Enforce integers only
+    inp.addEventListener("input", () => {
+      // Remove non-digits
+      let val = inp.value.replace(/\D/g, "");
+      // Limit to 2 digits (just in case)
+      if (val.length > 2) val = val.slice(0, 2);
+      if (val !== inp.value) inp.value = val;
+    });
+
+    return inp;
+  };
+
+  const stH = makeTimeInput("startTimeH", "hh");
+  const stM = makeTimeInput("startTimeM", "mm");
+  const stS = makeTimeInput("startTimeS", "ss");
+
+  const sep1 = document.createElement("span");
+  sep1.className = "startTimeSep";
+  sep1.textContent = ":";
+
+  const sep2 = document.createElement("span");
+  sep2.className = "startTimeSep";
+  sep2.textContent = ":";
+
+  stContainer.appendChild(stH);
+  stContainer.appendChild(sep1);
+  stContainer.appendChild(stM);
+  stContainer.appendChild(sep2);
+  stContainer.appendChild(stS);
+
+  stGroup.appendChild(stContainer);
+  row.appendChild(stGroup);
 
   // Video Name
+  const vnGroup = document.createElement("div");
+  vnGroup.className = "inputGroup";
+
+  /* REMOVED Video Name label per user request
+  const vnLabel = document.createElement("div");
+  vnLabel.className = "fieldLabel";
+  vnLabel.textContent = "Video Name";
+  vnGroup.appendChild(vnLabel);
+  */
+
   const vn = document.createElement("input");
   vn.type = "text";
   vn.className = "videoNameInput";
   vn.placeholder = "Video Name";
   vn.autocomplete = "off";
-  row.appendChild(vn);
+  vnGroup.appendChild(vn);
+  row.appendChild(vnGroup);
 
   block.appendChild(row);
 
@@ -1596,7 +1676,31 @@ function ensureVideoRow(idx) {
     maybeAddNextRow();
   });
 
-  st.addEventListener("input", () => maybeAddNextRow());
+  stH.addEventListener("input", () => {
+    if (stH.value.length >= 2) stM.focus();
+    maybeAddNextRow();
+  });
+  stM.addEventListener("input", () => {
+    if (stM.value.length >= 2) stS.focus();
+    maybeAddNextRow();
+  });
+
+  // Backspace navigation
+  const handleBackspace = (current, prev) => (e) => {
+    if (e.key === "Backspace" && current.value === "") {
+      e.preventDefault();
+      prev.focus();
+      if (prev.value.length > 0) {
+        prev.value = prev.value.slice(0, -1);
+        maybeAddNextRow(); // Trigger update since we modified a value
+      }
+    }
+  };
+
+  stM.addEventListener("keydown", handleBackspace(stM, stH));
+  stS.addEventListener("keydown", handleBackspace(stS, stM));
+
+  stS.addEventListener("input", () => maybeAddNextRow());
 
   list.appendChild(block);
   return block;
@@ -1656,9 +1760,13 @@ const compactVideoRows = () => {
 
       if (newIndex > oldIndex) {
         // Row moved down (was a gap) -> Clear metadata
-        const st = b.querySelector(".startTime");
+        const stH = b.querySelector(".startTimeH");
+        const stM = b.querySelector(".startTimeM");
+        const stS = b.querySelector(".startTimeS");
         const vn = b.querySelector(".videoNameInput");
-        if (st) st.value = "";
+        if (stH) stH.value = "";
+        if (stM) stM.value = "";
+        if (stS) stS.value = "";
         if (vn) vn.value = "";
 
         // Also ensure URL/File are clean (though they should be empty to be here)
@@ -1784,12 +1892,19 @@ function collectSourcesFromUI() {
   for (const block of blocks) {
     const urlEl = block.querySelector(".videoUrl");
     const fileEl = block.querySelector(".videoFile");
-    const stEl = block.querySelector(".startTime");
+    const stH = block.querySelector(".startTimeH");
+    const stM = block.querySelector(".startTimeM");
+    const stS = block.querySelector(".startTimeS");
     const vnEl = block.querySelector(".videoNameInput");
 
     const f = fileEl?.files?.[0] || null;
     const rawUrl = (urlEl?.value || "").trim();
-    const startAt = parseStartTimeToSeconds(stEl?.value || "");
+
+    const h = parseInt(stH?.value || "0", 10) || 0;
+    const m = parseInt(stM?.value || "0", 10) || 0;
+    const s = parseInt(stS?.value || "0", 10) || 0;
+    const startAt = (h * 3600) + (m * 60) + s;
+
     const name = (vnEl?.value || "").trim();
 
     if (f) {
@@ -1799,11 +1914,14 @@ function collectSourcesFromUI() {
       const twitchId = extractTwitchId(rawUrl);
       if (twitchId) {
         sources.push({ type: "twitch", videoId: twitchId, startAt, name });
+      } else if (rawUrl.includes("twitch.tv")) {
+        // Found a Twitch URL but couldn't extract a valid VOD/Clip ID -> Bad
+        sources.push({ type: "bad", raw: rawUrl, startAt, name, inputElement: urlEl });
       } else {
         // Fall back to YouTube
         const id = extractId(rawUrl);
         if (id) sources.push({ type: "yt", id, startAt, name });
-        else sources.push({ type: "bad", raw: rawUrl, startAt, name });
+        else sources.push({ type: "bad", raw: rawUrl, startAt, name, inputElement: urlEl });
       }
     }
   }
@@ -1818,12 +1936,60 @@ function cleanupObjectUrls() {
   activeObjectUrls = [];
 }
 
-function loadVideos() {
-  const sources = collectSourcesFromUI();
+function validateStartTimes() {
+  const list = el("videoList");
+  const blocks = Array.from(list?.querySelectorAll(".videoBlock") || []);
+  let allValid = true;
 
-  const bad = sources.filter(s => s.type === "bad");
-  if (bad.length) {
-    setStatus(`One or more YouTube links look invalid. Fix them and try again.`, true);
+  for (const block of blocks) {
+    const stContainer = block.querySelector(".startTimeContainer");
+    const stH = block.querySelector(".startTimeH");
+    const stM = block.querySelector(".startTimeM");
+    const stS = block.querySelector(".startTimeS");
+
+    if (stContainer) stContainer.classList.remove("error");
+
+    const h = parseInt(stH?.value || "0", 10) || 0;
+    const m = parseInt(stM?.value || "0", 10) || 0;
+    const s = parseInt(stS?.value || "0", 10) || 0;
+
+    // Check ranges: mm and ss must be < 60. hh is naturally limited by 2 digits (0-99).
+    if (m > 59 || s > 59) {
+      if (stContainer) stContainer.classList.add("error");
+      allValid = false;
+    }
+  }
+
+  return allValid;
+}
+
+function loadVideos() {
+  // Clear any previous error highlights on URL inputs
+  const list = el("videoList");
+  const allInputs = list ? Array.from(list.querySelectorAll(".videoUrl")) : [];
+  allInputs.forEach(inp => inp.classList.remove("error"));
+
+  // Run validation checks
+  const startTimesOk = validateStartTimes(); // Internal side-effect: adds .error class to start time inputs
+  const sources = collectSourcesFromUI();
+  const badSources = sources.filter(s => s.type === "bad");
+
+  // Highlight bad URLs
+  if (badSources.length > 0) {
+    badSources.forEach(s => {
+      if (s.inputElement) s.inputElement.classList.add("error");
+    });
+  }
+
+  // If any validation failed, stop here
+  if (!startTimesOk || badSources.length > 0) {
+    if (!startTimesOk && badSources.length > 0) {
+      setStatus("Please check start times and video links.", true);
+    } else if (!startTimesOk) {
+      setStatus("Please check start time.", true);
+    } else {
+      setStatus("One or more video links look invalid. Fix them and try again.", true);
+    }
     return;
   }
 
@@ -1839,7 +2005,7 @@ function loadVideos() {
   const totalCount = realSources.length;
 
   if (totalCount <= 0) {
-    setStatus("Add at least one YouTube link/ID or choose a local video file.", true);
+    setStatus("Add at least one YouTube/Twitch link/ID or choose a local video file.", true);
     return;
   }
 
@@ -2060,6 +2226,15 @@ function loadVideos() {
               frame.style.pointerEvents = "none";
             }
 
+            // Apply initial start time if present, and ensure PAUSED state
+            const localStart = Math.max(0, Number(src.startAt) || 0);
+            if (localStart > 0) {
+              try {
+                yt.seekTo(localStart, true);
+                if (typeof yt.pauseVideo === 'function') yt.pauseVideo();
+              } catch { }
+            }
+
             afterAnyReady();
           },
 
@@ -2137,13 +2312,7 @@ function loadVideos() {
 
       players[i] = makeYtAdapter(yt);
 
-      // Apply initial start time once player is usable
-      const localStart = Math.max(0, Number(src.startAt) || 0);
-      if (localStart > 0) {
-        setTimeout(() => {
-          try { yt.seekTo(localStart, true); } catch { }
-        }, 250);
-      }
+      players[i] = makeYtAdapter(yt);
 
       return;
     }
@@ -2459,92 +2628,21 @@ function loadVideos() {
 /* Initialize the dynamic setup list on first load */
 ipcRenderer.send("app:setKeybindsArmed", false);
 initVideoSetupUI();
+initDevMode();
 
-/* ---------- Update checking ---------- */
-
-function normalizeVersion(v) {
-  const s = String(v || "").trim();
-  const m = s.match(/^v?(\d+)\.(\d+)\.(\d+)$/);
-  if (!m) return null;
-  return `${parseInt(m[1], 10)}.${parseInt(m[2], 10)}.${parseInt(m[3], 10)}`;
-}
-
-function compareVersions(a, b) {
-  const pa = a.split(".").map(n => parseInt(n, 10));
-  const pb = b.split(".").map(n => parseInt(n, 10));
-  for (let i = 0; i < 3; i++) {
-    const da = pa[i] || 0;
-    const db = pb[i] || 0;
-    if (da > db) return 1;
-    if (da < db) return -1;
-  }
-  return 0;
-}
-
-async function fetchUpdateManifest() {
-  const res = await fetch(UPDATE_MANIFEST_URL, { cache: "no-store" });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return await res.json();
-}
-
-async function checkForUpdates() {
+async function initDevMode() {
   try {
-    setStatus("Checking for updates.");
-    const manifest = await fetchUpdateManifest();
-
-    const latestVersion = normalizeVersion(manifest?.version);
-    const downloadUrl = String(manifest?.url || "").trim();
-    const notes = String(manifest?.notes || "").trim();
-
-    if (!latestVersion || !downloadUrl) {
-      setStatus("Update manifest is missing version/url.", true);
-      return;
+    const isDev = await ipcRenderer.invoke("app:isDev");
+    if (isDev) {
+      document.body.classList.add("dev-mode");
+      // console.log("Dev mode enabled");
     }
-
-    const cur = normalizeVersion(currentAppVersion || "0.0.0");
-    const cmp = compareVersions(latestVersion, cur);
-
-    if (cmp <= 0) {
-      setStatus(`You're up to date (v${cur}).`);
-      return;
-    }
-
-    const msg =
-      `Update available!\n\n` +
-      `Current: v${cur}\n` +
-      `Latest:  v${latestVersion}\n\n` +
-      (notes ? `Notes:\n${notes}\n\n` : "") +
-      `Download now?`;
-
-    const ok = window.confirm(msg);
-    if (ok) {
-      setStatus(`Downloading v${latestVersion}…`);
-
-      // Download inside app (to Downloads)
-      const { filePath } = await ipcRenderer.invoke("update:downloadInstaller", {
-        url: downloadUrl,
-        version: latestVersion
-      });
-
-      setStatus(`Downloaded v${latestVersion}. Ready to install.`);
-
-      const installNow = window.confirm(
-        `Downloaded v${latestVersion}.\n\nInstall now?\n\n(Your current version will close so the installer can run.)`
-      );
-
-      if (installNow) {
-        // Launch installer, then quit app so install isn't blocked
-        await ipcRenderer.invoke("update:installAndQuit", { filePath });
-        // No further UI needed; app will quit
-      }
-    } else {
-      setStatus(`Update available (v${latestVersion}).`);
-    }
-
   } catch (err) {
-    setStatus(`Update check failed: ${err?.message || err}`, true);
+    console.error("Failed to check dev mode:", err);
   }
 }
+
+
 
 /* ---------- App version UI ---------- */
 
@@ -2574,7 +2672,7 @@ on("zenBar", "mouseleave", () => scheduleHide());
 
 // Topbar
 on("loadBtn", "click", loadVideos);
-on("checkUpdateBtn", "click", checkForUpdates);
+
 
 // Keybinds modal open / close
 const kbModal = el("keybindsModal");
@@ -2584,10 +2682,21 @@ const openKb = () => {
   kbModal?.classList.add("open");
 };
 
-const closeKb = () => kbModal?.classList.remove("open");
+const closeKb = () => {
+  kbModal?.classList.remove("open");
+  setEditing(null);
+};
 
 on("keybindsBtn", "click", openKb);
 on("keybindsClose", "click", closeKb);
+on("keybindsReset", "click", () => {
+  if (confirm("Reset all keybinds to default?")) {
+    keybinds = { ...DEFAULT_BINDS };
+    saveKeybinds();
+    renderKeybindsUi();
+    setEditing(null); // cancel any active edit
+  }
+});
 
 // Click outside panel to close (Discord-style)
 kbModal?.addEventListener("click", (e) => {
@@ -2603,7 +2712,13 @@ document.querySelectorAll(".kbEdit").forEach(btn => {
   btn.addEventListener("click", () => {
     const action = btn.getAttribute("data-action");
     if (!action) return;
-    setEditing(action);
+
+    // Toggle: if already editing this action, cancel it
+    if (editingAction === action) {
+      setEditing(null);
+    } else {
+      setEditing(action);
+    }
   });
 });
 
@@ -2672,6 +2787,9 @@ on("zSpeed", "change", () => {
 });
 
 on("zSettings", "click", () => {
+  // Pause all videos so audio doesn't keep playing in background
+  pauseAll();
+
   // Exit focus modes if active before showing settings
   if (document.body.classList.contains("focusLayout")) {
     exitFocusLayout();

@@ -12,6 +12,11 @@ const { startServer } = require("./server");
 // Existing handler (keep)
 ipcMain.handle("app:getVersion", () => app.getVersion());
 
+// Dev mode check
+ipcMain.handle("app:isDev", () => {
+  return process.env.DEV_UI === "1" && !app.isPackaged;
+});
+
 // Alias handler (fixes: "No handler registered for 'getVersion'")
 ipcMain.handle("getVersion", () => app.getVersion());
 
@@ -76,89 +81,7 @@ ipcMain.handle("feedback:submit", async (_event, { message }) => {
   return { success: true };
 });
 
-function sanitizeFilename(name) {
-  return String(name || "installer.exe").replace(/[<>:"/\\|?*\x00-\x1F]/g, "_");
-}
 
-function guessFilenameFromUrl(urlStr) {
-  try {
-    const u = new URL(urlStr);
-    const last = (u.pathname.split("/").pop() || "").trim();
-    return sanitizeFilename(last || "installer.exe");
-  } catch {
-    return "installer.exe";
-  }
-}
-
-function downloadHttpsToFile(urlStr, destPath, maxRedirects = 5) {
-  return new Promise((resolve, reject) => {
-    const doReq = (uStr, redirectsLeft) => {
-      const req = https.get(uStr, { headers: { "User-Agent": "VOD-Review-Updater" } }, (res) => {
-        // Redirect handling
-        if (res.statusCode && [301, 302, 303, 307, 308].includes(res.statusCode)) {
-          const loc = res.headers.location;
-          if (!loc) return reject(new Error("Redirect without location header."));
-          if (redirectsLeft <= 0) return reject(new Error("Too many redirects."));
-          const nextUrl = new URL(loc, uStr).toString();
-          res.resume();
-          return doReq(nextUrl, redirectsLeft - 1);
-        }
-
-        if (res.statusCode !== 200) {
-          res.resume();
-          return reject(new Error(`Download failed (HTTP ${res.statusCode}).`));
-        }
-
-        const file = fs.createWriteStream(destPath);
-        res.pipe(file);
-
-        file.on("finish", () => file.close(() => resolve(destPath)));
-        file.on("error", (err) => {
-          try { fs.unlinkSync(destPath); } catch { }
-          reject(err);
-        });
-      });
-
-      req.on("error", reject);
-    };
-
-    doReq(urlStr, maxRedirects);
-  });
-}
-
-// Download installer to Downloads folder
-ipcMain.handle("update:downloadInstaller", async (_event, { url, version } = {}) => {
-  const downloadUrl = String(url || "").trim();
-  if (!downloadUrl) throw new Error("Missing download URL.");
-
-  const downloadsDir = app.getPath("downloads");
-  const filenameFromUrl = guessFilenameFromUrl(downloadUrl);
-
-  // Prefer a versioned filename if we can
-  const v = String(version || "").trim();
-  const preferred = v ? sanitizeFilename(`VOD.Review.Setup.${v}.exe`) : filenameFromUrl;
-  const targetPath = path.join(downloadsDir, preferred);
-
-  // Ensure we can overwrite
-  try { fs.unlinkSync(targetPath); } catch { }
-
-  await downloadHttpsToFile(downloadUrl, targetPath);
-  return { filePath: targetPath };
-});
-
-// Launch installer, then quit current app
-ipcMain.handle("update:installAndQuit", async (_event, { filePath } = {}) => {
-  const exePath = String(filePath || "").trim();
-  if (!exePath) throw new Error("Missing installer path.");
-  if (!fs.existsSync(exePath)) throw new Error("Installer file not found.");
-
-  // Launch installer normally (UI)
-  spawn(exePath, [], { detached: true, stdio: "ignore" }).unref();
-
-  // Quit current app so installer isn't blocked by running process
-  app.quit();
-  return { ok: true };
-});
 
 let serverHandle = null;
 
@@ -179,8 +102,13 @@ async function createWindow() {
       nodeIntegration: true,
       contextIsolation: false
     },
-    icon: path.join(__dirname, "icon.ico")
+    icon: path.join(__dirname, "icon.ico"),
+    autoHideMenuBar: process.env.DEV_UI !== "1"
   });
+
+  if (process.env.DEV_UI !== "1") {
+    win.setMenu(null);
+  }
 
   win.loadURL(`http://127.0.0.1:${serverHandle.port}/index.html`);
   // Custom keybinds: capture at the webContents level so it works even when a YouTube iframe is focused
@@ -227,7 +155,20 @@ async function createWindow() {
   });
 }
 
-app.whenReady().then(createWindow);
+// Disable hardware media keys to prevent hijacking global shortcuts
+app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling,MediaSessionService');
+
+app.whenReady().then(() => {
+  // Check for admin privileges on Windows
+  if (process.platform === 'win32') {
+    require('child_process').exec('net session', (err, stdout, stderr) => {
+      if (!err) {
+        console.warn("\x1b[31m%s\x1b[0m", "WARNING: Running as Administrator. This may block third-party hotkeys (Discord, etc).");
+      }
+    });
+  }
+  createWindow();
+});
 
 app.on("window-all-closed", () => {
   if (serverHandle?.server) serverHandle.server.close();
