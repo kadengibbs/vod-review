@@ -31,6 +31,7 @@ const ENTER_ZEN_ON_LOAD = true;
 // After Load is clicked successfully, block native YouTube + HTML5 <video> keyboard shortcuts.
 // (We will add app-level shortcuts later.)
 let keybindsArmed = false;
+let isLoadingScreenActive = false;
 
 // Mute selection mode state
 let muteSelectMode = false;
@@ -141,7 +142,7 @@ function isNativePlayerKey(e) {
 
 // Capture-phase so we beat focused elements (including <video>).
 document.addEventListener("keydown", (e) => {
-  if (!keybindsArmed) return;
+  if (!keybindsArmed || isLoadingScreenActive) return;
   if (isTypingTarget(e.target)) return;
 
   if (isNativePlayerKey(e)) {
@@ -168,7 +169,7 @@ document.addEventListener("focusout", () => {
 const DEFAULT_BINDS = {
   rew30: "g",
   rew5: "h",
-  playpause: "j",
+  playpause: " ",
   fwd5: "k",
   fwd30: "l",
   mute: "m",
@@ -249,7 +250,7 @@ const { ipcRenderer, shell } = require("electron");
 
 // Custom keybinds forwarded from main process (works even when YouTube iframe has focus)
 ipcRenderer.on("app:customKeybind", (_evt, action) => {
-  if (!keybindsArmed) return;
+  if (!keybindsArmed || isLoadingScreenActive) return;
 
   // Don’t trigger shortcuts while typing in inputs
   if (isTypingTarget(document.activeElement)) return;
@@ -387,6 +388,9 @@ function shouldParticipate(i, globalTarget) {
   // If there's no global target (ex: pause), allow everyone
   if (globalTarget == null) return true;
 
+  // Exclude failed players
+  if (failedPlayerIndices.has(i)) return false;
+
   // If video was marked ended, it should NOT participate if global target is still past its end.
   // It *may* rejoin if global target is before end.
   const d = getDurationSafe(i);
@@ -507,7 +511,9 @@ function pauseAll(lockoutMs = 450) {
 }
 
 function anyPlaying() {
-  for (const p of players) {
+  for (let i = 0; i < players.length; i++) {
+    if (failedPlayerIndices.has(i)) continue;
+    const p = players[i];
     if (!p) continue;
     // Skip Twitch players that aren't fully ready (unreliable state during init)
     if (p.__type === "twitch" && !p.__ready) continue;
@@ -529,6 +535,7 @@ function togglePlayPauseAll() {
 /* ---------- Mute selection mode ---------- */
 
 function toggleMuteSelectMode() {
+  if (popupState.isOpen && !muteSelectMode) return;
   muteSelectMode = !muteSelectMode;
   document.body.classList.toggle("muteSelectMode", muteSelectMode);
 
@@ -637,6 +644,7 @@ document.addEventListener("click", (e) => {
 /* ---------- Focus selection mode ---------- */
 
 function toggleFocusSelectMode() {
+  if (popupState.isOpen && !focusMode) return;
   // Only allow focus mode if 2+ videos loaded
   if (players.length < 2) return;
 
@@ -1074,6 +1082,7 @@ function removeColorSelector() {
 }
 
 function toggleDrawMode() {
+  if (popupState.isOpen && !drawMode) return;
   drawMode = !drawMode;
   document.body.classList.toggle("drawMode", drawMode);
   document.body.classList.remove("drawMouseActive"); // <--- RESET ON TOGGLE
@@ -1284,6 +1293,24 @@ function setZenMode(onMode) {
   document.body.classList.toggle("zen", !!onMode);
   showZenBar(!!onMode && players.length > 0);
   updateZenBarSpace();
+
+  // Handle explicit visibility changes from loadVideos/exitToVideoLoader
+  if (!onMode) {
+    // Exiting Zen = Showing Input/Controls
+    // We must revert the inline 'display: none' hacks we added
+    const setup = document.querySelector(".setupPane");
+    if (setup) setup.style.display = ""; // Remove inline, let CSS handle it
+
+    const topbar = document.querySelector(".topbar");
+    if (topbar) topbar.style.display = ""; // Remove inline, let CSS handle it
+
+    // Grid: If we are exiting Zen, do we hide Grid? 
+    // Usually "Zen Mode" off means we see the setup pane above the grid?
+    // Or does it mean we see the top bar + setup pane AND the grid?
+    // If we clear the inline styles, CSS default for .setupPane is block.
+    // CSS default for .grid depends.
+    // Let's just trust that clearing 'display: none' allows the CSS to work as before.
+  }
 
   setTimeout(() => {
     setAutoHide(false);
@@ -1964,6 +1991,9 @@ function validateStartTimes() {
 }
 
 function loadVideos() {
+  failedPlayerIndices.clear();
+  pendingUnavailableModal = false;
+
   // Clear any previous error highlights on URL inputs
   const list = el("videoList");
   const allInputs = list ? Array.from(list.querySelectorAll(".videoUrl")) : [];
@@ -2007,6 +2037,82 @@ function loadVideos() {
   if (totalCount <= 0) {
     setStatus("Add at least one YouTube/Twitch link/ID or choose a local video file.", true);
     return;
+  }
+
+  // Show loading screen only on success
+  // Show loading screen only on success
+  const overlay = document.getElementById("loadingOverlay");
+
+  // Switch to Grid View immediately
+  const setup = document.querySelector(".setupPane");
+  if (setup) setup.style.display = "none";
+
+  if (el("grid")) {
+    el("grid").style.display = ""; // Reset to default (visible)
+  }
+
+  // Ensure topbar is hidden in Grid View (unless Zen mode logic handles it differently, but user implies it shouldn't be there)
+  // Based on user feedback, the "Video Loader UI" (Grid) should NOT have the Top Bar.
+  const topbar = document.querySelector(".topbar");
+  if (topbar) topbar.style.display = "none";
+
+  const minDuration = 1500;
+
+  // State for dynamic loading
+  let loadingState = {
+    readyCount: 0,
+    totalCount: totalCount,
+    minTimeDone: false,
+    hasTwitch: realSources.some(s => s.type === "twitch"),
+    twitchDelayDone: false,
+    delayTimerStarted: false
+  };
+
+  const checkLoadingScreen = () => {
+    if (loadingState.readyCount >= loadingState.totalCount && loadingState.minTimeDone) {
+      // If we have Twitch videos, add an extra 1s delay
+      if (loadingState.hasTwitch && !loadingState.twitchDelayDone) {
+        if (!loadingState.delayTimerStarted) {
+          loadingState.delayTimerStarted = true;
+          setTimeout(() => {
+            loadingState.twitchDelayDone = true;
+            checkLoadingScreen(); // Re-check to close
+          }, 1000);
+        }
+        return;
+      }
+
+      if (overlay) {
+        overlay.style.display = "none";
+        isLoadingScreenActive = false;
+
+        // Show pending unavailable modal if any failed during loading
+        if (pendingUnavailableModal) {
+          openVideoUnavailableModal(null);
+          pendingUnavailableModal = false;
+        }
+      }
+    }
+  };
+
+  if (overlay) {
+    overlay.style.display = "flex";
+    isLoadingScreenActive = true;
+
+    // Reset and apply animation (using minDuration for the fade-in speed)
+    const icon = document.getElementById("loadingIcon");
+    if (icon) {
+      icon.style.animation = "none";
+      void icon.offsetWidth; // trigger reflow
+      // 1.5s in + 1.5s out = 3s total cycle
+      icon.style.animation = `loadingPulse 3s linear infinite`;
+    }
+
+    // Start minimum timer
+    setTimeout(() => {
+      loadingState.minTimeDone = true;
+      checkLoadingScreen();
+    }, minDuration);
   }
 
 
@@ -2211,7 +2317,42 @@ function loadVideos() {
           origin: "http://127.0.0.1"
         },
         events: {
+          onError: (event) => {
+            const code = event.data;
+            // 101 or 150 = embed not allowed
+            if (code === 101 || code === 150) {
+              console.log(`[Player ${i}] Embed failed (code ${code})`);
+              openVideoUnavailableModal(i);
+            }
+          },
+          onStateChange: (event) => {
+            const state = event.data;
+            // 1=PLAYING, 2=PAUSED, 3=BUFFERING
+            if (state === 1 || state === 2 || state === 3) {
+              if (embedCheckTimers[i]) {
+                clearTimeout(embedCheckTimers[i]);
+                delete embedCheckTimers[i];
+              }
+              // If it was marked failed, unmark it
+              if (failedPlayerIndices.has(i)) {
+                failedPlayerIndices.delete(i);
+                const card = document.querySelectorAll("#grid .card")[i];
+                if (card) {
+                  card.style.opacity = "1";
+                  card.style.pointerEvents = "auto";
+                }
+              }
+            }
+          },
           onReady: () => {
+            // Timeout removed: it was causing false positives on valid videos that start paused.
+            // if (embedCheckTimers[i]) clearTimeout(embedCheckTimers[i]);
+            // embedCheckTimers[i] = setTimeout(...)
+
+            // Mark ready
+            loadingState.readyCount++;
+            checkLoadingScreen();
+
             setStatus(`Loaded ${totalCount} video(s).`, false);
 
             // Mute by default
@@ -2350,6 +2491,10 @@ function loadVideos() {
       // We use both a local variable and set __ready on the adapter for anyPlaying() checks
 
       twitchPlayer.addEventListener(Twitch.Player.READY, () => {
+        // Mark ready
+        loadingState.readyCount++;
+        checkLoadingScreen();
+
         setStatus(`Loaded ${totalCount} video(s).`, false);
 
         // Style the iframe to fill the holder
@@ -2605,6 +2750,9 @@ function loadVideos() {
     players[i] = makeFileAdapter(v, cleanup);
 
     v.addEventListener("loadedmetadata", () => {
+      loadingState.readyCount++;
+      checkLoadingScreen();
+
       setStatus(`Loaded ${totalCount} video(s).`, false);
       afterAnyReady();
 
@@ -2670,6 +2818,7 @@ on("zenBar", "mouseenter", () => showBarNow());
 on("zenBar", "mousemove", () => showBarNow());
 on("zenBar", "mouseleave", () => scheduleHide());
 
+// Topbar
 // Topbar
 on("loadBtn", "click", loadVideos);
 
@@ -2888,6 +3037,9 @@ on("zenSeek", "change", () => {
 
 // Keyboard + resize
 window.addEventListener("keydown", e => {
+  // Ignore keys during global loading
+  if (isLoadingScreenActive) return;
+
   if (e.key === "Escape") {
     // Exit all interactive modes
     if (muteSelectMode) {
@@ -2895,13 +3047,14 @@ window.addEventListener("keydown", e => {
       document.body.classList.remove("muteSelectMode");
     }
     if (focusMode) {
-      toggleFocusMode();
+      toggleFocusSelectMode();
     }
     if (drawMode) {
       toggleDrawMode();
     }
     if (document.body.classList.contains("zen")) {
-      toggleZenMode();
+      // Use common exit logic
+      exitToVideoLoader();
     }
 
     // Disable keybinds until Load is pressed again
@@ -2978,4 +3131,190 @@ on("feedbackSubmit", "click", async () => {
     el("feedbackStatus").textContent = "Failed to send. Try again.";
     el("feedbackSubmit").disabled = false;
   }
+});
+
+
+// --- Video Unavailable Modal Logic ---
+let popupState = {
+  isOpen: false,
+  stepIndex: 0,
+  maxSteps: 3,
+  sourceTileId: null
+};
+
+// Track failed players to exclude from sync
+let failedPlayerIndices = new Set();
+let pendingUnavailableModal = false;
+// Timers for embed failure detection (index -> timerId)
+let embedCheckTimers = {};
+
+function openVideoUnavailableModal(playerIndex) {
+  // If players are cleared (exited to loader), ignore late errors
+  if (players.length === 0) return;
+
+  // If this tile caused the popup, ensure it's marked as failed
+  if (playerIndex !== null) {
+    if (!failedPlayerIndices.has(playerIndex)) {
+      failedPlayerIndices.add(playerIndex);
+      // Refresh safe area or other UI if needed?
+      // Maybe dim the card or show an icon?
+      const card = document.querySelectorAll("#grid .card")[playerIndex];
+      if (card) {
+        card.style.opacity = "0.5";
+        card.style.pointerEvents = "none";
+      }
+    }
+
+    const label = document.getElementById("vuFailedVideoLabel");
+    if (label) {
+      // Sort indices and map to "Video X"
+      const failedList = Array.from(failedPlayerIndices)
+        .sort((a, b) => a - b)
+        .map(i => i + 1)
+        .join(", ");
+      label.textContent = `Failed: Video ${failedList}`;
+    }
+  }
+
+  // Defer showing if loading screen is still up
+  if (isLoadingScreenActive) {
+    pendingUnavailableModal = true;
+    return;
+  }
+
+  if (popupState.isOpen) return; // Prevent spam
+
+  popupState.isOpen = true;
+  popupState.sourceTileId = playerIndex;
+  popupState.stepIndex = 0;
+
+  document.getElementById("videoUnavailableModal").classList.add("open");
+  updateVuStepper();
+
+  // Hide Top Bar for a cleaner look (modal covers everything properly)
+  const topbar = document.querySelector(".topbar");
+  if (topbar) topbar.style.display = "none";
+
+  // Disable keybinds while modal is open
+  keybindsArmed = false;
+  ipcRenderer.send("app:setKeybindsArmed", false);
+}
+
+function closeVideoUnavailableModal() {
+  popupState.isOpen = false;
+  popupState.sourceTileId = null;
+  document.getElementById("videoUnavailableModal").classList.remove("open");
+
+  // Re-enable keybinds when modal closes (if we are exiting, exitToVideoLoader will disable them again immediately)
+  keybindsArmed = true;
+  ipcRenderer.send("app:setKeybindsArmed", true);
+}
+
+
+function exitToVideoLoader() {
+  closeVideoUnavailableModal();
+  document.body.classList.remove("zen");
+  document.body.classList.remove("zenPinned");
+  const zenBar = document.getElementById("zenBar");
+  if (zenBar) zenBar.classList.remove("show");
+
+  const grid = document.getElementById("grid");
+  if (grid) {
+    grid.style.display = "none";
+    grid.innerHTML = "";
+  }
+
+  const setup = document.querySelector(".setupPane");
+  if (setup) setup.style.display = "block";
+
+  const topbar = document.querySelector(".topbar");
+  if (topbar) topbar.style.display = "flex";
+
+  players.forEach(p => { try { p.pauseVideo(); } catch { } });
+  players = [];
+
+  // Clear any pending embed check timers so they don't pop up late
+  Object.values(embedCheckTimers).forEach(timerId => clearTimeout(timerId));
+  embedCheckTimers = {};
+}
+
+function updateVuStepper() {
+  // Show/Hide slides
+  const slides = document.querySelectorAll(".vuSlide");
+  slides.forEach(slide => {
+    const s = parseInt(slide.dataset.step, 10);
+    slide.style.display = (s === popupState.stepIndex) ? "block" : "none";
+  });
+
+  // Update Dots
+  const dots = document.querySelectorAll(".vuDot");
+  dots.forEach((dot, i) => {
+    if (i === popupState.stepIndex) dot.classList.add("active");
+    else dot.classList.remove("active");
+  });
+
+  // Buttons
+  const prevBtn = document.getElementById("vuPrevBtn");
+  const nextBtn = document.getElementById("vuNextBtn");
+
+  if (prevBtn) {
+    const isFirst = (popupState.stepIndex <= 0);
+    prevBtn.disabled = isFirst;
+    prevBtn.style.opacity = isFirst ? "0" : "1";
+    // Also set cursor to default if hidden to avoid confusion? 
+    // css disabled handles cursor: not-allowed, but if hidden we probably want it to feel gone.
+    prevBtn.style.cursor = isFirst ? "default" : "pointer";
+  }
+
+  if (nextBtn) {
+    // If last step, show "Done", otherwise "Next"
+    if (popupState.stepIndex >= popupState.maxSteps) {
+      nextBtn.textContent = "Done";
+    } else {
+      nextBtn.textContent = "Next"; // Restore label if went back
+    }
+    // Always enabled now (unless we want to block "Done"?)
+    nextBtn.disabled = false;
+    nextBtn.style.opacity = "";
+  }
+}
+
+// Wire up events
+document.addEventListener("DOMContentLoaded", () => {
+
+  document.getElementById("vuPrevBtn")?.addEventListener("click", (e) => {
+    e.target.blur();
+    if (popupState.stepIndex > 0) {
+      popupState.stepIndex--;
+      updateVuStepper();
+    }
+  });
+
+  document.getElementById("vuNextBtn")?.addEventListener("click", (e) => {
+    e.target.blur();
+    // If on last step, "Done" -> Close
+    if (popupState.stepIndex >= popupState.maxSteps) {
+      exitToVideoLoader();
+    } else {
+      popupState.stepIndex++;
+      updateVuStepper();
+    }
+  });
+
+  // New X close button
+  document.getElementById("vuCloseBtn")?.addEventListener("click", () => {
+    exitToVideoLoader();
+  });
+
+  // Secondary link if it exists/user kept it (Removing based on request, but safe to keep handler if element exists)
+  document.getElementById("vuBackToLoader")?.addEventListener("click", () => {
+    exitToVideoLoader();
+  });
+
+  // Global Esc key handler for this popup
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && popupState.isOpen) {
+      exitToVideoLoader();
+    }
+  });
 });

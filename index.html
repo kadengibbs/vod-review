@@ -907,10 +907,111 @@
         width: 62px;
       }
     }
+
+    /* Loading Overlay */
+    #loadingOverlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: #1f1f1f url('assets/texture.png') no-repeat center center;
+      background-size: cover;
+      z-index: 2000;
+      /* default display is none, manipulated by JS */
+      display: none;
+      /* Center context for children */
+      align-items: center;
+      justify-content: center;
+    }
+
+    #loadingIcon {
+      width: 600px;
+      height: auto;
+      z-index: 2001;
+      opacity: 0;
+      /* Animation will be applied in JS */
+    }
+
+    @keyframes loadingPulse {
+      0% {
+        opacity: 0;
+      }
+
+      50% {
+        opacity: 1;
+      }
+
+      100% {
+        opacity: 0;
+      }
+    }
+
+    /* Video Unavailable Modal Buttons */
+    .vuBtn {
+      background: #eee;
+      color: #111;
+      border: none;
+      border-radius: 8px;
+      padding: 8px 16px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+
+    .vuBtn:hover {
+      opacity: 0.9;
+    }
+
+    .vuBtn:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+    }
+
+    .vuBtnSecondary {
+      background: transparent;
+      color: #aaa;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 8px 16px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .vuBtnSecondary:hover {
+      color: #fff;
+      border-color: #666;
+    }
+
+    /* Dots */
+    .vuDots {
+      display: flex;
+      gap: 6px;
+    }
+
+    .vuDot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #444;
+      border: 1px solid #555;
+    }
+
+    .vuDot.active {
+      background: #eee;
+      border-color: #fff;
+      box-shadow: 0 0 4px rgba(255, 255, 255, 0.4);
+    }
   </style>
 </head>
 
 <body>
+  <div id="loadingOverlay">
+    <img src="assets/loading-icon.png" id="loadingIcon" alt="Loading">
+  </div>
   <div class="app">
     <div class="topbar">
       <!-- required order -->
@@ -1081,6 +1182,79 @@
       <div style="margin-top:16px;display:flex;gap:10px;align-items:center;flex-shrink:0;">
         <span id="feedbackStatus" style="flex:1;font-size:13px;color:#aaa;"></span>
         <button id="feedbackSubmit" disabled style="padding:10px;font-size:14px;">Submit</button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Video Unavailable Modal -->
+  <div id="videoUnavailableModal" class="modalBackdrop">
+    <div class="modalPanel" style="width: 500px; max-width: 90vw; padding: 0;">
+      <!-- Title Bar -->
+      <div style="padding: 24px 24px 10px 24px; display: flex; align-items: center; justify-content: space-between;">
+        <h3 style="margin: 0; font-size: 20px;">Video Unavailable Inside VOD Review</h3>
+        <button id="vuCloseBtn" class="modalClose" style="position: static; margin-left: 12px;">
+          <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"
+            stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Content Area (Stepper) -->
+      <div id="vuStepper" style="padding: 0 24px; min-height: 160px;">
+        <!-- Slide 0 -->
+        <div class="vuSlide" data-step="0">
+
+          <p id="vuFailedVideoLabel" style="margin: 0 0 10px 0; color: #ff0000; font-weight: 500;">Failed: Video #</p>
+          <p style="margin: 0; color: #aaa; line-height: 1.5;">
+            This video can’t be played in an embedded player due to YouTube restrictions.
+          </p>
+          <p style="margin: 20px 0 0 0; color: #888; font-size: 13px; font-style: italic;">
+            Click "Next" for possible reasons or click the "X" icon to go back to the video loader.
+          </p>
+        </div>
+        <!-- Slide 1 -->
+        <div class="vuSlide" data-step="1" style="display:none;">
+          <p style="margin: 0 0 10px 0; color: #ddd; font-weight: 500;">Licensing & Copyright</p>
+          <p style="margin: 0; color: #aaa; line-height: 1.5;">
+            Music, broadcast rights, or partner agreements can prevent embedded playback.
+          </p>
+        </div>
+        <!-- Slide 2 -->
+        <div class="vuSlide" data-step="2" style="display:none;">
+          <p style="margin: 0 0 10px 0; color: #ddd; font-weight: 500;">Embedding Disabled</p>
+          <p style="margin: 0; color: #aaa; line-height: 1.5;">
+            The uploader or rights holder can block embedded playback, even though the video works on youtube.com.
+          </p>
+        </div>
+        <!-- Slide 3 -->
+        <div class="vuSlide" data-step="3" style="display:none;">
+          <p style="margin: 0 0 10px 0; color: #ddd; font-weight: 500;">Age / Region / Sign-in</p>
+          <p style="margin: 0; color: #aaa; line-height: 1.5;">
+            Some videos require sign-in, age confirmation, or are region-limited. Embedded players may fail.
+          </p>
+        </div>
+
+      </div>
+
+      <!-- Action Bar -->
+      <div
+        style="padding: 20px 24px 24px 24px; display: flex; align-items: center; justify-content: space-between; margin-top: 10px;">
+        <!-- Left: Back -->
+        <button id="vuPrevBtn" class="vuBtn" disabled>Back</button>
+
+        <!-- Center: Dots -->
+        <div class="vuDots">
+          <div class="vuDot active"></div>
+          <div class="vuDot"></div>
+          <div class="vuDot"></div>
+          <div class="vuDot"></div>
+        </div>
+
+        <!-- Right: Next -->
+        <button id="vuNextBtn" class="vuBtn">Next</button>
       </div>
     </div>
   </div>
