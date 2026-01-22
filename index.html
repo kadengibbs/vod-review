@@ -163,9 +163,16 @@
     }
 
     .chip input[type="number"]::-webkit-outer-spin-button,
-    .chip input[type="number"]::-webkit-inner-spin-button {
+    .chip input[type="number"]::-webkit-inner-spin-button,
+    .paramInput::-webkit-outer-spin-button,
+    .paramInput::-webkit-inner-spin-button {
       -webkit-appearance: none;
       margin: 0;
+    }
+
+    .settingsRow.disabled {
+      opacity: 0.5;
+      pointer-events: none;
     }
 
     .chip select {
@@ -588,7 +595,7 @@
     /* Focus layout - main video + bottom strip using CSS Grid */
     body.focusLayout .grid {
       display: grid !important;
-      grid-template-rows: 7fr 3fr;
+      grid-template-rows: var(--focus-main, 7fr) var(--focus-sub, 3fr);
       grid-auto-columns: 1fr;
       gap: var(--gap);
       height: 100%;
@@ -771,7 +778,7 @@
       background: #0b0b0b;
       border: 1px solid #222;
       border-radius: 18px;
-      padding: 22px 24px;
+      padding: 22px 24px 0 24px;
       min-width: 320px;
     }
 
@@ -892,8 +899,153 @@
       transform: translateY(1px);
     }
 
+    /* --- Settings Modal with Tabs --- */
+    .settingsTabs {
+      display: flex;
+      gap: 0;
+      background: #0f0f0f;
+      border-bottom: 1px solid #222;
+      margin: -22px -24px 0 -24px;
+      padding: 0 12px 0 24px;
+      border-radius: 18px 18px 0 0;
+      align-items: center;
+    }
 
+    .settingsTabClose {
+      margin-left: auto;
+      background: transparent;
+      border: none;
+      color: #888;
+      width: 40px;
+      height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      border-radius: 8px;
+      transition: color 0.15s, background 0.15s;
+    }
 
+    .settingsTabClose:hover {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .settingsTabClose:focus {
+      outline: none;
+      background-image: none !important;
+      border: none !important;
+    }
+
+    .settingsTab {
+      background: transparent;
+      border: none;
+      color: #888;
+      font-size: 14px;
+      font-weight: 500;
+      padding: 14px 16px 12px 16px;
+      cursor: pointer;
+      position: relative;
+      transition: color 0.15s;
+    }
+
+    .settingsTab:hover {
+      color: #ccc;
+    }
+
+    .settingsTab.active {
+      color: #fff;
+    }
+
+    .settingsTab.active::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 16px;
+      right: 16px;
+      height: 2px;
+      background: #fff;
+      border-radius: 1px;
+    }
+
+    .settingsTab:focus {
+      outline: none;
+      background-image: none !important;
+      border: none !important;
+    }
+
+    .settingsTabContent {
+      display: none;
+    }
+
+    .settingsTabContent.active {
+      display: block;
+    }
+
+    .settingsEmptyState {
+      color: #666;
+      font-size: 14px;
+      text-align: center;
+      padding: 40px 20px;
+    }
+
+    .settingsRow {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 11px 0 12px 0;
+      border-bottom: 1px solid #222;
+    }
+
+    .settingsRow:last-child {
+      border-bottom: none;
+    }
+
+    .settingsLabel {
+      font-size: 14px;
+      color: #ccc;
+    }
+
+    .settingsCycle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .cycleBtn {
+      background: transparent;
+      border: 1px solid #444;
+      color: #888;
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.15s;
+      margin-top: 1px;
+    }
+
+    .cycleBtn:hover {
+      border-color: #666;
+      color: #fff;
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .cycleBtn:focus {
+      outline: none;
+      background-image: none !important;
+      border: 1px solid #666 !important;
+    }
+
+    .cycleValue {
+      min-width: 80px;
+      text-align: center;
+      font-size: 14px;
+      color: #fff;
+    }
 
 
 
@@ -1005,6 +1157,122 @@
       border-color: #fff;
       box-shadow: 0 0 4px rgba(255, 255, 255, 0.4);
     }
+
+    /* Layout Tab Styles */
+    .layoutTabHeader {
+      margin-bottom: 8px;
+      font-size: 15px;
+      color: #aaa;
+      font-weight: 500;
+      text-align: center;
+      opacity: 0.8;
+    }
+
+    .layoutOptionGroup {
+      display: flex;
+      gap: 6px;
+    }
+
+    .layoutPrefBtn {
+      min-width: 50px;
+      height: 36px;
+      padding: 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      align-items: center;
+      justify-content: center;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .layoutPrefBtn:hover:not(.active) {
+      border-color: #444;
+    }
+
+    .layoutPrefBtn.active {
+      background: #111111;
+      border: 1px solid #666;
+      box-shadow: 0 0 0 1px #555;
+    }
+
+    /* Custom Tooltip */
+    .custom-tooltip {
+      position: absolute;
+      background: #222;
+      color: #eee;
+      border: 1px solid #444;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+      z-index: 10000;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.15s;
+      max-width: 250px;
+      line-height: 1.4;
+      text-align: left;
+    }
+
+    .custom-tooltip.show {
+      opacity: 1;
+    }
+
+    .help-icon {
+      /* Marker class for JS */
+      margin-top: 1px;
+    }
+
+    #keybindLegend {
+      display: none;
+      background: #0f0f0f;
+      padding: 0 10px;
+      height: 27px;
+      align-items: center;
+      justify-content: center;
+      gap: 24px;
+      font-size: 12px;
+      color: #999;
+      width: 100%;
+      flex: 0 0 auto;
+      user-select: none;
+    }
+
+    body.zen #keybindLegend {
+      display: flex;
+    }
+
+    body.zen .grid {
+      padding-top: 0;
+    }
+
+    body.zen.keybind-legend-hidden .grid {
+      padding-top: 5px;
+    }
+
+    .kblItem {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .kblKey {
+      background: #222;
+      border: 1px solid #444;
+      border-radius: 4px;
+      padding: 2px 6px;
+      color: #eee;
+      font-weight: 600;
+      font-size: 11px;
+      min-width: 20px;
+      text-align: center;
+      line-height: 11px;
+      font-family: inherit;
+    }
   </style>
 </head>
 
@@ -1012,6 +1280,8 @@
   <div id="loadingOverlay">
     <img src="assets/loading-icon.png" id="loadingIcon" alt="Loading">
   </div>
+  <!-- Custom Tooltip Element -->
+  <div id="customTooltip" class="custom-tooltip"></div>
   <div class="app">
     <div class="topbar">
       <!-- required order -->
@@ -1026,7 +1296,7 @@
         <button id="layoutC" class="layoutBtn" style="display:none;"></button>
       </div>
 
-      <div class="chip">
+      <div id="driftOptions" class="chip">
         Drift
         <input id="threshold" type="number" step="0.05" value="0.25" title="Auto-correct drift threshold (seconds)">
       </div>
@@ -1040,7 +1310,7 @@
 
 
 
-      <button id="keybindsBtn">Keybinds</button>
+      <button id="settingsBtn">Settings</button>
       <button id="feedbackBtn">Improve This App</button>
 
 
@@ -1056,6 +1326,10 @@
       <div class="videoHint">Paste a YouTube, Twitch VOD link/ID, or use Browse. A new video row appears automatically
         once you fill
         one, up to six videos.</div>
+    </div>
+
+    <div id="keybindLegend">
+      <!-- Populated via JS -->
     </div>
 
     <div class="grid" id="grid"></div>
@@ -1092,72 +1366,377 @@
   <script src="https://player.twitch.tv/js/embed/v1.js"></script>
   <script src="https://www.youtube.com/iframe_api"></script>
 
-  <!-- Keybinds modal -->
-  <div id="keybindsModal" class="modalBackdrop">
-    <div class="modalPanel" style="width: fit-content; max-width: 90vw;">
-      <button id="keybindsReset" class="modalReset" aria-label="Reset to defaults" title="Reset to defaults">
-        <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"
-          stroke-linecap="round" stroke-linejoin="round">
-          <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
-          <path d="M3 3v5h5"></path>
-        </svg>
-      </button>
-      <button id="keybindsClose" class="modalClose" aria-label="Close">
-        <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"
-          stroke-linecap="round" stroke-linejoin="round">
-          <line x1="18" y1="6" x2="6" y2="18"></line>
-          <line x1="6" y1="6" x2="18" y2="18"></line>
-        </svg>
-      </button>
-      <h3 style="margin:0 0 20px 0;font-size:20px;">Keybinds</h3>
+  <!-- Settings modal with tabs -->
+  <div id="settingsModal" class="modalBackdrop">
+    <div class="modalPanel" tabindex="-1" style="width: fit-content; max-width: 90vw; min-width: 400px; height: 471px;">
+      <!-- Tab bar with integrated close button -->
+      <div class="settingsTabs">
+        <button class="settingsTab active" data-tab="general">General</button>
+        <button class="settingsTab" data-tab="layout">Layout</button>
+        <button class="settingsTab" data-tab="keybinds">Keybinds</button>
+        <button id="keybindsReset" class="settingsTabClose" aria-label="Reset to defaults"
+          title="Reset keybinds to defaults" style="margin-left: auto;">
+          <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+            <path d="M3 3v5h5"></path>
+          </svg>
+        </button>
+        <button id="settingsClose" class="settingsTabClose" aria-label="Close" style="margin-left: 0;">
+          <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"
+            stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
 
-      <div class="kbGrid">
-        <div class="kbRow" data-action="rew30">
-          <div class="kbKey" id="kb_key_rew30">G</div>
-          <div class="kbAction">-30s</div>
-          <button class="kbEdit" data-action="rew30">Edit</button>
+      <!-- General tab content -->
+      <div id="settingsTabGeneral" class="settingsTabContent active">
+        <div class="settingsRow">
+          <span class="settingsLabel">Launch Display Mode</span>
+          <div class="settingsCycle">
+            <button class="cycleBtn" id="displayModeLeft">◀</button>
+            <span class="cycleValue" id="displayModeValue">Windowed</span>
+            <button class="cycleBtn" id="displayModeRight">▶</button>
+          </div>
+        </div>
+        <div class="settingsRow">
+          <span class="settingsLabel">Audio on Load</span>
+          <div class="settingsCycle">
+            <button class="cycleBtn" id="audioOnLoadLeft">◀</button>
+            <span class="cycleValue" id="audioOnLoadValue">Mute All</span>
+            <button class="cycleBtn" id="audioOnLoadRight">▶</button>
+          </div>
+        </div>
+        <div class="settingsRow">
+          <span class="settingsLabel">Pause On Draw</span>
+          <div class="settingsCycle">
+            <!-- Using cycle buttons for consistency, toggling On/Off -->
+            <button class="cycleBtn" id="pauseOnDrawLeft">◀</button>
+            <span class="cycleValue" id="pauseOnDrawValue">On</span>
+            <button class="cycleBtn" id="pauseOnDrawRight">▶</button>
+          </div>
+        </div>
+        <div class="settingsRow">
+          <div style="display: flex; align-items: center; gap: 2px;">
+            <span class="settingsLabel">Show Keybind Legend</span>
+            <div id="keybindLegendHelp" class="help-icon"
+              style="color: #666; cursor: pointer; display: flex; align-items: center;"
+              data-help-text="Displays active keybinds at the top of the video screen">
+              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"
+                stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+              </svg>
+            </div>
+          </div>
+          <div class="settingsCycle">
+            <button class="cycleBtn" id="keybindLegendLeft">◀</button>
+            <span class="cycleValue" id="keybindLegendValue">On</span>
+            <button class="cycleBtn" id="keybindLegendRight">▶</button>
+          </div>
+        </div>
+        <div class="settingsRow">
+          <div style="display: flex; align-items: center; gap: 2px;">
+            <span class="settingsLabel">Drift Correction</span>
+            <!-- Help Icon -->
+            <div id="driftCorrectionHelp" class="help-icon"
+              style="color: #666; cursor: pointer; display: flex; align-items: center;"
+              data-help-text="Prevents videos from slowly drifting out of sync">
+              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"
+                stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+              </svg>
+            </div>
+          </div>
+          <div class="settingsCycle">
+            <button class="cycleBtn" id="driftEnabledLeft">◀</button>
+            <span class="cycleValue" id="driftEnabledValue">On</span>
+            <button class="cycleBtn" id="driftEnabledRight">▶</button>
+          </div>
         </div>
 
-        <div class="kbRow" data-action="rew5">
-          <div class="kbKey" id="kb_key_rew5">H</div>
-          <div class="kbAction">-5s</div>
-          <button class="kbEdit" data-action="rew5">Edit</button>
+        <style>
+          .paramInput {
+            height: 28px;
+            box-sizing: border-box;
+            background: #111;
+            border: 1px solid #444;
+            border-radius: 6px;
+            color: #eee;
+            margin-top: 1px;
+          }
+
+          .paramInput:focus {
+            outline: none;
+            border-color: #666;
+          }
+        </style>
+
+        <div class="settingsRow" id="stdDriftRow">
+          <div style="display: flex; align-items: center; gap: 2px;">
+            <span class="settingsLabel">Standard Drift Tolerance</span>
+            <div id="stdDriftHelp" class="help-icon"
+              style="color: #666; cursor: pointer; display: flex; align-items: center;"
+              data-help-text="Maximum allowed drift (in seconds) for YouTube and local videos">
+              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"
+                stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+              </svg>
+            </div>
+          </div>
+          <input type="number" id="driftStandardInput" step="0.01" min="0.1" value="0.25" class="paramInput"
+            style="width: 60px; text-align: center;">
         </div>
 
-        <div class="kbRow" data-action="playpause">
-          <div class="kbKey" id="kb_key_playpause">J</div>
-          <div class="kbAction">Pause / Play</div>
-          <button class="kbEdit" data-action="playpause">Edit</button>
+        <div class="settingsRow" id="twitchDriftRow">
+          <div style="display: flex; align-items: center; gap: 2px;">
+            <span class="settingsLabel">Twitch Drift Tolerance</span>
+            <div id="twitchDriftHelp" class="help-icon"
+              style="color: #666; cursor: pointer; display: flex; align-items: center;"
+              data-help-text="Maximum allowed drift (in seconds) for Twitch VODs">
+              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"
+                stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+              </svg>
+            </div>
+          </div>
+          <input type="number" id="driftTwitchInput" step="0.01" min="1.0" value="1.00" class="paramInput"
+            style="width: 60px; text-align: center;">
+        </div>
+      </div>
+
+      <!-- Layout tab content -->
+      <div id="settingsTabLayout" class="settingsTabContent">
+        <div class="layoutTabHeader" style="
+          height: 53px; 
+          display: flex; 
+          align-items: center; 
+          justify-content: center; 
+          border-bottom: 1px solid #222; 
+          margin: 0; 
+          font-size: 15px; 
+          color: #aaa; 
+          font-weight: 500;">
+          Select Your Preferred Layout
         </div>
 
-        <div class="kbRow" data-action="fwd5">
-          <div class="kbKey" id="kb_key_fwd5">K</div>
-          <div class="kbAction">+5s</div>
-          <button class="kbEdit" data-action="fwd5">Edit</button>
+        <div id="layoutPreferencesList">
+          <!-- Populated via JS -->
         </div>
 
-        <div class="kbRow" data-action="fwd30">
-          <div class="kbKey" id="kb_key_fwd30">L</div>
-          <div class="kbAction">+30s</div>
-          <button class="kbEdit" data-action="fwd30">Edit</button>
+        <style>
+          /* Force separators on layout list */
+          #layoutPreferencesList .settingsRow:last-child {
+            border-bottom: 1px solid #222;
+          }
+
+          /* Reduce padding for layout rows to achieve 52px total height (8+36+8=52) */
+          #layoutPreferencesList .settingsRow {
+            padding: 8px 0;
+          }
+        </style>
+
+        <div class="settingsRow">
+          <div style="display: flex; align-items: center; gap: 2px;">
+            <span class="settingsLabel">Focused Video Size</span>
+            <div id="focusSizeHelp" class="help-icon"
+              style="color: #666; cursor: pointer; display: flex; align-items: center;"
+              data-help-text="Determines the ratio of the focused video and unfocused videos">
+              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"
+                stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+              </svg>
+            </div>
+          </div>
+          <div class="settingsCycle">
+            <button class="cycleBtn" id="focusSizeLeft">◀</button>
+            <span class="cycleValue" id="focusSizeValue">Focused (70 / 30)</span>
+            <button class="cycleBtn" id="focusSizeRight">▶</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Keybinds tab content -->
+      <div id="settingsTabKeybinds" class="settingsTabContent">
+        <style>
+          /* Keybinds specific styles */
+          /* Explicitly override padding for Keybinds to ensure 52px height */
+          #settingsTabKeybinds .settingsRow {
+            padding: 11px 0 13px 0;
+          }
+
+          .kbKey {
+            background: #111;
+            border: 1px solid #444;
+            border-radius: 6px;
+            padding: 0 10px 2px 10px;
+            min-width: 40px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: inherit;
+            line-height: 1;
+            font-weight: 600;
+            font-size: 13px;
+            color: #eee;
+            margin-right: 4px;
+          }
+
+          /* Edit icon button */
+          .kbEdit {
+            background: transparent;
+            border: none;
+            color: #888;
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: color 0.15s, background 0.15s;
+            padding: 0;
+          }
+
+          .kbEdit:hover {
+            color: #fff;
+            background: rgba(255, 255, 255, 0.08);
+          }
+
+          /* Visual feedback for edit mode */
+          .kbRow.editing .kbKey {
+            border-color: #fff;
+            background: #222;
+            box-shadow: 0 0 0 1px #fff;
+          }
+
+          .kbRow.editing .kbEdit {
+            color: #fff;
+          }
+        </style>
+
+        <div class="settingsRow kbRow" data-action="rew30">
+          <span class="settingsLabel">Rewind 30s</span>
+          <div class="settingsCycle">
+            <div class="kbKey" id="kb_key_rew30">G</div>
+            <button class="kbEdit" data-action="rew30" title="Edit">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 20h9"></path>
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+              </svg>
+            </button>
+          </div>
         </div>
 
-        <div class="kbRow" data-action="mute">
-          <div class="kbKey" id="kb_key_mute">M</div>
-          <div class="kbAction">Toggle Mute</div>
-          <button class="kbEdit" data-action="mute">Edit</button>
+        <div class="settingsRow kbRow" data-action="rew5">
+          <span class="settingsLabel">Rewind 5s</span>
+          <div class="settingsCycle">
+            <div class="kbKey" id="kb_key_rew5">H</div>
+            <button class="kbEdit" data-action="rew5" title="Edit">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 20h9"></path>
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+              </svg>
+            </button>
+          </div>
         </div>
 
-        <div class="kbRow" data-action="focus">
-          <div class="kbKey" id="kb_key_focus">F</div>
-          <div class="kbAction">Toggle Focus</div>
-          <button class="kbEdit" data-action="focus">Edit</button>
+        <div class="settingsRow kbRow" data-action="playpause">
+          <span class="settingsLabel">Pause / Play</span>
+          <div class="settingsCycle">
+            <div class="kbKey" id="kb_key_playpause">J</div>
+            <button class="kbEdit" data-action="playpause" title="Edit">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 20h9"></path>
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+              </svg>
+            </button>
+          </div>
         </div>
 
-        <div class="kbRow" data-action="draw">
-          <div class="kbKey" id="kb_key_draw">D</div>
-          <div class="kbAction">Toggle Draw</div>
-          <button class="kbEdit" data-action="draw">Edit</button>
+        <div class="settingsRow kbRow" data-action="fwd5">
+          <span class="settingsLabel">Forward 5s</span>
+          <div class="settingsCycle">
+            <div class="kbKey" id="kb_key_fwd5">K</div>
+            <button class="kbEdit" data-action="fwd5" title="Edit">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 20h9"></path>
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="settingsRow kbRow" data-action="fwd30">
+          <span class="settingsLabel">Forward 30s</span>
+          <div class="settingsCycle">
+            <div class="kbKey" id="kb_key_fwd30">L</div>
+            <button class="kbEdit" data-action="fwd30" title="Edit">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 20h9"></path>
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="settingsRow kbRow" data-action="mute">
+          <span class="settingsLabel">Toggle Mute</span>
+          <div class="settingsCycle">
+            <div class="kbKey" id="kb_key_mute">M</div>
+            <button class="kbEdit" data-action="mute" title="Edit">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 20h9"></path>
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="settingsRow kbRow" data-action="focus">
+          <span class="settingsLabel">Toggle Focus</span>
+          <div class="settingsCycle">
+            <div class="kbKey" id="kb_key_focus">F</div>
+            <button class="kbEdit" data-action="focus" title="Edit">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 20h9"></path>
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="settingsRow kbRow" data-action="draw">
+          <span class="settingsLabel">Toggle Draw</span>
+          <div class="settingsCycle">
+            <div class="kbKey" id="kb_key_draw">D</div>
+            <button class="kbEdit" data-action="draw" title="Edit">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 20h9"></path>
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
     </div>

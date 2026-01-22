@@ -165,6 +165,8 @@ document.addEventListener("focusout", () => {
   }, 10);
 });
 
+
+
 // ----- Editable keybinds -----
 const DEFAULT_BINDS = {
   rew30: "g",
@@ -178,7 +180,21 @@ const DEFAULT_BINDS = {
 };
 
 let keybinds = loadKeybinds();
+let showKeybindLegend = loadShowKeybindLegend();
 let editingAction = null;
+
+function loadShowKeybindLegend() {
+  try {
+    const raw = localStorage.getItem("vod_show_kbl");
+    return raw !== "false"; // Default true
+  } catch {
+    return true;
+  }
+}
+
+function saveShowKeybindLegend() {
+  localStorage.setItem("vod_show_kbl", String(showKeybindLegend));
+}
 
 function loadKeybinds() {
   try {
@@ -227,6 +243,57 @@ function renderKeybindsUi() {
   set("kb_key_mute", keybinds.mute);
   set("kb_key_focus", keybinds.focus);
   set("kb_key_draw", keybinds.draw);
+
+  updateKeybindLegend();
+}
+
+
+function updateKeybindLegend() {
+  const legend = document.getElementById("keybindLegend");
+  if (!legend) return;
+
+  const items = [
+    { key: keybinds.rew30, label: "-30s" },
+    { key: keybinds.rew5, label: "-5s" },
+    { key: keybinds.playpause, label: "Play/Pause" },
+    { key: keybinds.fwd5, label: "+5s" },
+    { key: keybinds.fwd30, label: "+30s" },
+    { key: keybinds.mute, label: "Mute" },
+    { key: keybinds.focus, label: "Focus" },
+    { key: keybinds.draw, label: "Draw" }
+  ];
+
+  legend.innerHTML = items.map(item => {
+    let k = String(item.key || "").toUpperCase();
+    if (k === " ") k = "SPACE";
+    if (k === "") k = "UNBOUND";
+    return `<div class="kblItem"><span class="kblKey">${k}</span> ${item.label}</div>`;
+  }).join("");
+
+  // Only show if setting is true; logic for "zen mode only" is handled by CSS (body.zen)
+  // But if showKeybindLegend is false, we want it hidden even in zen mode.
+  // The CSS says: #keybindLegend { display: none; } ... body.zen #keybindLegend { display: flex; }
+  // We need to override that if showKeybindLegend is false.
+  if (!showKeybindLegend) {
+    legend.style.setProperty("display", "none", "important");
+    document.body.classList.add("keybind-legend-hidden");
+  } else {
+    legend.style.removeProperty("display");
+    document.body.classList.remove("keybind-legend-hidden");
+    // Let CSS handle the rest (flex in .zen, none otherwise)
+  }
+}
+
+function updateKeybindLegendToggleUI() {
+  const v = el("keybindLegendValue");
+  if (v) v.textContent = showKeybindLegend ? "On" : "Off";
+  updateKeybindLegend();
+}
+
+function cycleKeybindLegend() {
+  showKeybindLegend = !showKeybindLegend;
+  saveShowKeybindLegend();
+  updateKeybindLegendToggleUI();
 }
 
 function setEditing(actionOrNull) {
@@ -237,10 +304,18 @@ function setEditing(actionOrNull) {
     const isEditing = action === editingAction;
     r.classList.toggle("editing", isEditing);
 
-    // Update button text
+    // Update button icon
     const btn = r.querySelector(".kbEdit");
     if (btn) {
-      btn.textContent = isEditing ? "Cancel" : "Edit";
+      if (isEditing) {
+        // X icon (Cancel)
+        btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
+        btn.title = "Cancel";
+      } else {
+        // Pencil icon (Edit)
+        btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>`;
+        btn.title = "Edit";
+      }
     }
   });
 }
@@ -278,6 +353,84 @@ function on(id, event, handler) {
   if (!node) return;
   node.addEventListener(event, handler);
 }
+
+// Bind Keybind Legend toggle
+on("keybindLegendLeft", "click", cycleKeybindLegend);
+on("keybindLegendRight", "click", cycleKeybindLegend);
+
+// Help Tooltip Logic
+const showTooltip = (icon) => {
+  const tip = document.getElementById("customTooltip");
+  if (!tip || !icon) return;
+
+  const text = icon.getAttribute("data-help-text");
+  if (!text) return;
+
+  tip.textContent = text;
+  tip.classList.add("show");
+  tip._lastIcon = icon;
+
+  // Position it
+  const rect = icon.getBoundingClientRect();
+  // Position below the icon, centered if possible
+  let top = rect.bottom + 8;
+  let left = rect.left + (rect.width / 2) - 100; // Center guess
+
+  // Simple clamp (assuming usage in the modal mostly)
+  if (left < 10) left = 10;
+
+  // Check if it goes off right edge
+  const tipWidth = 200; // approx max width
+  if (left + tipWidth > window.innerWidth - 10) {
+    left = window.innerWidth - tipWidth - 10;
+  }
+
+  tip.style.top = top + "px";
+  tip.style.left = left + "px";
+};
+
+const hideTooltip = () => {
+  const tip = document.getElementById("customTooltip");
+  if (tip) {
+    tip.classList.remove("show");
+    tip._lastIcon = null;
+  }
+};
+
+document.addEventListener("click", (e) => {
+  const icon = e.target.closest(".help-icon");
+  if (icon) {
+    e.stopPropagation();
+    const tip = document.getElementById("customTooltip");
+    // If clicking same active icon, toggle off
+    if (tip?.classList.contains("show") && tip._lastIcon === icon) {
+      hideTooltip();
+    } else {
+      showTooltip(icon);
+    }
+  } else {
+    // Clicked elsewhere
+    hideTooltip();
+  }
+});
+
+document.addEventListener("mouseover", (e) => {
+  const icon = e.target.closest(".help-icon");
+  if (icon) {
+    showTooltip(icon);
+  }
+});
+
+document.addEventListener("mouseout", (e) => {
+  const icon = e.target.closest(".help-icon");
+  if (icon) {
+    // Only hide if we are currently showing THIS icon
+    const tip = document.getElementById("customTooltip");
+    if (tip && tip._lastIcon === icon) {
+      hideTooltip();
+    }
+  }
+});
 
 let statusTimer = null;
 function setStatus(msg, isError = false, timeoutMs = 0) {
@@ -1088,7 +1241,9 @@ function toggleDrawMode() {
   document.body.classList.remove("drawMouseActive"); // <--- RESET ON TOGGLE
 
   if (drawMode) {
-    pauseAll(100);
+    if (pauseOnDraw) {
+      pauseAll(100);
+    }
 
     if (muteSelectMode) {
       muteSelectMode = false;
@@ -1192,6 +1347,7 @@ function startDriftLoop() {
   driftTimer = setInterval(() => {
     if (!players.length) return;
     if (syncing || inLockout()) return;
+    if (!driftEnabled) return;
 
     // Only correct drift if something is playing
     if (!anyPlaying()) return;
@@ -1521,9 +1677,13 @@ function formatStartPlaceholder() {
   return "Start Time: hh:mm:ss";
 }
 
-function checkTwitchConstraints() {
+let lastTwitchState = null;
+
+async function checkTwitchConstraints(force = false) {
   const list = el("videoList");
   if (!list) return;
+
+  if (!driftEnabled) return; // Skip if drift is disabled
 
   // Check if any visible video input contains a Twitch URL
   const inputs = Array.from(list.querySelectorAll(".videoUrl"));
@@ -1532,22 +1692,41 @@ function checkTwitchConstraints() {
   const tInput = el("threshold");
   if (!tInput) return;
 
-  if (hasTwitch) {
-    if (cachedDriftBeforeTwitch === null) {
-      cachedDriftBeforeTwitch = tInput.value;
+  // Manual Check: If user is typing in the box (not a forced context switch)
+  if (!force && hasTwitch === lastTwitchState) {
+    const val = parseFloat(tInput.value);
+
+    // Enforce minima
+    if (hasTwitch) {
+      tInput.min = "1.0";
+      if (Number.isFinite(val) && val < 1.0) {
+        tInput.value = "1.0";
+        setStatus("Minimum drift required with Twitch is 1.0 sec", true, 3000);
+      }
+    } else {
+      tInput.min = "0.1";
+      if (Number.isFinite(val) && val < 0.1) {
+        tInput.value = "0.1";
+        setStatus("Minimum drift tolerance is 0.1 sec", true, 3000);
+      }
     }
-    tInput.min = "1";
-    if (Number(tInput.value) < 1) {
-      tInput.value = "1";
-      setStatus("Minimum drift required with Twitch is 1 sec", true, 3000);
-    }
-  } else {
-    tInput.removeAttribute("min");
-    if (cachedDriftBeforeTwitch !== null) {
-      tInput.value = cachedDriftBeforeTwitch;
-      cachedDriftBeforeTwitch = null;
-    }
+    return;
   }
+
+  // FORCE / CONTEXT SWITCH: Apply Defaults
+  let targetVal;
+  if (hasTwitch) {
+    targetVal = await ipcRenderer.invoke("drift:getTwitch");
+    if (!targetVal) targetVal = 1.0;
+    tInput.min = "1.0";
+  } else {
+    targetVal = await ipcRenderer.invoke("drift:getStandard");
+    if (!targetVal) targetVal = 0.25;
+    tInput.min = "0.1";
+  }
+
+  tInput.value = targetVal;
+  lastTwitchState = hasTwitch;
 }
 
 function ensureVideoRow(idx) {
@@ -1815,7 +1994,7 @@ const compactVideoRows = () => {
   });
 };
 
-function maybeAddNextRow() {
+async function maybeAddNextRow() {
   const list = el("videoList");
   if (!list) return;
 
@@ -1856,7 +2035,9 @@ function maybeAddNextRow() {
   const filledCount = lastFilledIndex + 1;
   if (filledCount !== currentFilledVideoCount) {
     currentFilledVideoCount = filledCount;
-    currentLayoutOption = 'A'; // Reset layout preference
+    // Load preference instead of resetting to 'A'
+    const prefs = await ipcRenderer.invoke("layout:getPreferences");
+    currentLayoutOption = prefs[filledCount] || 'A';
     updateLayoutOptionsUI(filledCount);
   }
 }
@@ -1990,7 +2171,10 @@ function validateStartTimes() {
   return allValid;
 }
 
-function loadVideos() {
+async function loadVideos() {
+  // Fetch audio on load setting
+  const audioOnLoad = await ipcRenderer.invoke("audio:getOnLoad");
+
   failedPlayerIndices.clear();
   pendingUnavailableModal = false;
 
@@ -2143,6 +2327,11 @@ function loadVideos() {
   }
 
   // Get layout configuration for this video count
+  // First, check if we have a persistent preference for this video count
+  const layoutPrefs = await ipcRenderer.invoke("layout:getPreferences");
+  const preferredOption = layoutPrefs[totalCount] || 'A';
+  currentLayoutOption = preferredOption;
+
   const layoutConfig = LAYOUT_CONFIGS[totalCount]?.[currentLayoutOption] ||
     LAYOUT_CONFIGS[totalCount]?.A ||
     [{ count: totalCount, centered: false }];
@@ -2227,13 +2416,30 @@ function loadVideos() {
     range.className = "volSlider";
     range.min = 0;
     range.max = 100;
-    range.value = 0; // Default mute
+
+    // Set initial volume based on audioOnLoad setting
+    // i is the card index (0-based), so i === 0 means primary video
+    let initialVolume = 0; // default mute-all
+    if (audioOnLoad === "unmute-all") {
+      initialVolume = 50;
+    } else if (audioOnLoad === "primary-only" && i === 0) {
+      initialVolume = 50;
+    }
+    range.value = initialVolume;
 
     const updateSliderFill = (input) => {
       const val = (input.value - input.min) / (input.max - input.min) * 100;
       input.style.background = `linear-gradient(to right, #eee ${val}%, #444 ${val}%)`;
     };
     updateSliderFill(range);
+
+    // Update icon to match initial volume
+    updateIcon(initialVolume);
+
+    // Add muted class to card if volume is 0
+    if (initialVolume === 0) {
+      card.classList.add("muted");
+    }
 
     range.addEventListener("input", (e) => {
       updateSliderFill(e.target);
@@ -2355,10 +2561,17 @@ function loadVideos() {
 
             setStatus(`Loaded ${totalCount} video(s).`, false);
 
-            // Mute by default
-            yt.mute();
+            // Apply audio on load setting
             const card = cards[i];
-            if (card) card.classList.add("muted");
+            const shouldUnmute = audioOnLoad === "unmute-all" || (audioOnLoad === "primary-only" && i === 0);
+            if (shouldUnmute) {
+              yt.unMute();
+              yt.setVolume(50);
+              if (card) card.classList.remove("muted");
+            } else {
+              yt.mute();
+              if (card) card.classList.add("muted");
+            }
 
             // Only disable mouse interaction if controls are hidden
             // If controls are shown, we let the user interact (sync might be affected but that's expected)
@@ -2473,19 +2686,28 @@ function loadVideos() {
       // Check controls setting (reusing the same checkbox as YT)
       const showControls = el("ytControlsToggle")?.checked || false;
 
+      // Apply audio on load setting
+      const shouldUnmuteTwitch = audioOnLoad === "unmute-all" || (audioOnLoad === "primary-only" && i === 0);
+
       const twitchPlayer = new Twitch.Player(holder.id, {
         width: "100%",
         height: "100%",
         video: src.videoId,
         parent: ["127.0.0.1"],
         autoplay: false,
-        muted: true,
+        muted: !shouldUnmuteTwitch,
         controls: showControls
       });
 
-      // Mark as muted by default
+      // Mark as muted based on setting
       const card = cards[i];
-      if (card) card.classList.add("muted");
+      if (card) {
+        if (shouldUnmuteTwitch) {
+          card.classList.remove("muted");
+        } else {
+          card.classList.add("muted");
+        }
+      }
 
       // Track if Twitch player is fully ready (to avoid spurious events during initialization)
       // We use both a local variable and set __ready on the adapter for anyPlaying() checks
@@ -2496,6 +2718,19 @@ function loadVideos() {
         checkLoadingScreen();
 
         setStatus(`Loaded ${totalCount} video(s).`, false);
+
+        // Apply audio on load setting after player is ready
+        // (constructor muted option may not always work due to browser policies)
+        if (shouldUnmuteTwitch) {
+          try {
+            twitchPlayer.setMuted(false);
+            twitchPlayer.setVolume(0.5); // 50%
+          } catch { }
+        } else {
+          try {
+            twitchPlayer.setMuted(true);
+          } catch { }
+        }
 
         // Style the iframe to fill the holder
         // Only disable pointer events if controls are HIDDEN.
@@ -2612,7 +2847,13 @@ function loadVideos() {
     // No native HTML5 video UI (we control playback via the app)
     v.controls = false;
     v.playsInline = true;
-    v.muted = true; // Mute by default
+
+    // Apply audio on load setting for file player
+    const shouldUnmuteFile = audioOnLoad === "unmute-all" || (audioOnLoad === "primary-only" && i === 0);
+    v.muted = !shouldUnmuteFile;
+    if (shouldUnmuteFile) {
+      v.volume = 0.5; // 50%
+    }
 
     // Extra hardening: remove extra built-in menus/features when supported
     v.setAttribute("controlslist", "nodownload noremoteplayback noplaybackrate");
@@ -2629,9 +2870,15 @@ function loadVideos() {
 
     wrap.appendChild(v);
 
-    // Mute by default (visual state)
+    // Muted state based on setting (visual state)
     const card = el("grid")?.children[i];
-    if (card) card.classList.add("muted");
+    if (card) {
+      if (shouldUnmuteFile) {
+        card.classList.remove("muted");
+      } else {
+        card.classList.add("muted");
+      }
+    }
 
     // Wire file events for sync
     const onPlay = () => {
@@ -2778,6 +3025,18 @@ ipcRenderer.send("app:setKeybindsArmed", false);
 initVideoSetupUI();
 initDevMode();
 
+// Initialize drift input validation (Moved from top to avoid el ref error)
+const driftInput = el("threshold");
+if (driftInput) {
+  driftInput.addEventListener("change", () => {
+    let val = parseFloat(driftInput.value);
+    // Respect minima based on twitch state
+    const min = driftInput.min ? parseFloat(driftInput.min) : 0;
+    if (!Number.isFinite(val) || val < min) val = min;
+    driftInput.value = val.toFixed(2);
+  });
+}
+
 async function initDevMode() {
   try {
     const isDev = await ipcRenderer.invoke("app:isDev");
@@ -2823,38 +3082,607 @@ on("zenBar", "mouseleave", () => scheduleHide());
 on("loadBtn", "click", loadVideos);
 
 
-// Keybinds modal open / close
-const kbModal = el("keybindsModal");
+// Settings modal open / close + tab switching
+const settingsModal = el("settingsModal");
 
-const openKb = () => {
+const openSettings = () => {
   renderKeybindsUi();
-  kbModal?.classList.add("open");
+  updateDisplayModeUI();
+  updateAudioOnLoadUI();
+  renderLayoutPreferences();
+  updateFocusSizeUI();
+  updatePauseOnDrawUI();
+  updateDriftCorrectionUI();
+  updateResetTooltip("general");
+  // Force reset tabs to "General"
+  const tabs = document.querySelectorAll(".settingsTab");
+  const panels = document.querySelectorAll(".settingsTabContent");
+  tabs.forEach(t => t.classList.remove("active"));
+  panels.forEach(p => p.classList.remove("active"));
+
+  // Set first tab active
+  const genTab = document.querySelector('.settingsTab[data-tab="general"]');
+  const genPanel = document.getElementById("settingsTabGeneral");
+  if (genTab) genTab.classList.add("active");
+  if (genPanel) genPanel.classList.add("active");
+
+  settingsModal?.classList.add("open");
 };
 
-const closeKb = () => {
-  kbModal?.classList.remove("open");
+const closeSettings = () => {
+  settingsModal?.classList.remove("open");
   setEditing(null);
 };
 
-on("keybindsBtn", "click", openKb);
-on("keybindsClose", "click", closeKb);
-on("keybindsReset", "click", () => {
-  if (confirm("Reset all keybinds to default?")) {
-    keybinds = { ...DEFAULT_BINDS };
-    saveKeybinds();
-    renderKeybindsUi();
-    setEditing(null); // cancel any active edit
+on("settingsBtn", "click", openSettings);
+on("settingsClose", "click", closeSettings);
+
+// ========== Tab-Specific Reset Functions ==========
+
+/**
+ * Reset General settings to defaults:
+ * - Display Mode: Windowed Maximized
+ * - Audio on Load: Mute All
+ * - Pause On Draw: On (true)
+ * - Drift Correction: On (true)
+ * - Standard Drift Tolerance: 0.25
+ * - Twitch Drift Tolerance: 1.00
+ */
+async function resetGeneralSettings() {
+  /* Display Mode is NO LONGER reset to defaults based on user request.
+  // Display Mode -> windowed-maximized (index 1)
+  currentDisplayModeIndex = 1;
+  await ipcRenderer.invoke("display:setMode", "windowed-maximized");
+  const displayEl = el("displayModeValue");
+  if (displayEl) displayEl.textContent = "Windowed Maximized"; */
+
+  // Audio on Load -> mute-all (index 0)
+  currentAudioOnLoadIndex = 0;
+  await ipcRenderer.invoke("audio:setOnLoad", "mute-all");
+  const audioEl = el("audioOnLoadValue");
+  if (audioEl) audioEl.textContent = "Mute All";
+
+  // Pause On Draw -> On (true)
+  await ipcRenderer.invoke("pause:setOnDraw", true);
+  pauseOnDraw = true;
+  const pauseEl = el("pauseOnDrawValue");
+  if (pauseEl) pauseEl.textContent = "On";
+
+  // Show Keybind Legend -> On (true)
+  showKeybindLegend = true;
+  saveShowKeybindLegend();
+  updateKeybindLegendToggleUI();
+
+  // CRITICAL: Set driftEnabled to true FIRST before updating inputs
+  await ipcRenderer.invoke("drift:setEnabled", true);
+  driftEnabled = true;
+
+  // Set drift tolerance values
+  await ipcRenderer.invoke("drift:setStandard", 0.25);
+  await ipcRenderer.invoke("drift:setTwitch", 1.0);
+
+  // Update UI for drift correction toggle
+  const driftValEl = el("driftEnabledValue");
+  if (driftValEl) driftValEl.textContent = "On";
+
+  // Show drift options in top bar
+  const driftOptions = el("driftOptions");
+  if (driftOptions) driftOptions.style.display = "";
+
+  // CRITICAL: Explicitly update the tolerance input states
+  // Set values and ensure they are editable (not disabled, not readOnly)
+  const stdInput = el("driftStandardInput");
+  const twInput = el("driftTwitchInput");
+
+  if (stdInput) {
+    stdInput.value = "0.25";
+    stdInput.disabled = false;
+    stdInput.readOnly = false;
+    stdInput.style.pointerEvents = "";
+    el("stdDriftRow")?.classList.remove("disabled");
   }
-});
+
+  if (twInput) {
+    twInput.value = "1.00";
+    twInput.disabled = false;
+    twInput.readOnly = false;
+    twInput.style.pointerEvents = "";
+    el("twitchDriftRow")?.classList.remove("disabled");
+  }
+
+  // Update top bar drift threshold too
+  const thresholdInput = el("threshold");
+  if (thresholdInput) thresholdInput.value = "0.25";
+
+  // Force check twitch constraints to update active threshold
+  checkTwitchConstraints(true);
+
+  // ACCEPTANCE CHECK: Log the states after reset for verification
+  // Expected: driftEnabled=true, stdInput.disabled=false, stdInput.readOnly=false, twInput.disabled=false, twInput.readOnly=false
+  console.log("[General Reset] Acceptance Check:", {
+    driftEnabled: driftEnabled,
+    stdInputDisabled: stdInput?.disabled,
+    stdInputReadOnly: stdInput?.readOnly,
+    twInputDisabled: twInput?.disabled,
+    twInputReadOnly: twInput?.readOnly
+  });
+  // Assert expected values
+  if (driftEnabled !== true || stdInput?.disabled !== false || stdInput?.readOnly !== false || twInput?.disabled !== false || twInput?.readOnly !== false) {
+    console.error("[General Reset] FAILED Acceptance Check! Tolerance inputs may not be editable.");
+  }
+}
+
+/**
+ * Reset Layout settings to defaults:
+ * - All layout preferences: 'A' (first option for each video count)
+ * - Focused Video Size: Focused (70/30)
+ */
+async function resetLayoutSettings() {
+  // Reset all layout preferences to 'A'
+  for (let count = 1; count <= 6; count++) {
+    await ipcRenderer.invoke("layout:setPreference", { count, option: 'A' });
+  }
+
+  // Focused Video Size -> focused (index 1)
+  currentFocusSizeIndex = 1;
+  await ipcRenderer.invoke("focus:setSize", "focused");
+  const focusEl = el("focusSizeValue");
+  if (focusEl) focusEl.textContent = "Focused (70 / 30)";
+  applyFocusSize("focused");
+
+  // Refresh the layout preferences UI
+  await renderLayoutPreferences();
+
+  // If we have videos loaded, update the current layout
+  if (currentFilledVideoCount > 0) {
+    currentLayoutOption = 'A';
+    updateLayoutOptionsUI(currentFilledVideoCount);
+    applyLayout();
+  }
+}
+
+/**
+ * Reset Keybind settings to defaults:
+ * G=-30s, H=-5s, Space=Pause/Play, K=+5s, L=+30s, M=Toggle Mute, F=Toggle Focus, D=Toggle Draw
+ */
+function resetKeybindSettings() {
+  keybinds = { ...DEFAULT_BINDS };
+  saveKeybinds();
+  renderKeybindsUi();
+  setEditing(null);
+}
+
+/**
+ * Get the currently active settings tab name
+ * Returns: "general" | "layout" | "keybinds"
+ */
+function getActiveSettingsTab() {
+  const activeTab = document.querySelector(".settingsTab.active");
+  return activeTab?.getAttribute("data-tab") || "general";
+}
+
+// Reset button hold logic
+const resetBtn = el("keybindsReset");
+let resetHoldTimer = null;
+let resetCountdownInterval = null;
+const RESET_HOLD_DURATION = 3000;
+let originalResetHtml = "";
+
+if (resetBtn) {
+  // Store the original icon
+  originalResetHtml = resetBtn.innerHTML;
+
+  resetBtn.addEventListener("mousedown", (e) => {
+    // Only left click
+    if (e.button !== 0) return;
+
+    const activeTab = getActiveSettingsTab();
+    let timeLeft = 3;
+
+    // Show initial count
+    resetBtn.textContent = timeLeft;
+    resetBtn.style.color = "#fff"; // highlighted state
+    resetBtn.style.fontSize = "16px";
+    resetBtn.style.fontWeight = "bold";
+
+    // Countdown interval to update the text
+    resetCountdownInterval = setInterval(() => {
+      timeLeft--;
+      if (timeLeft > 0) {
+        resetBtn.textContent = timeLeft;
+      }
+    }, 1000);
+
+    // Main timer to trigger the action
+    resetHoldTimer = setTimeout(async () => {
+      // Action triggering!
+      clearInterval(resetCountdownInterval);
+
+      switch (activeTab) {
+        case "general":
+          await resetGeneralSettings();
+          break;
+        case "layout":
+          await resetLayoutSettings();
+          break;
+        case "keybinds":
+          resetKeybindSettings();
+          break;
+      }
+
+      // Visual feedback that it finished
+      // We can flash it or just restore
+      resetBtn.innerHTML = originalResetHtml;
+      resetBtn.style.color = "";
+      resetBtn.style.fontSize = "";
+      resetBtn.style.fontWeight = "";
+
+      // Clear timers
+      resetHoldTimer = null;
+      resetCountdownInterval = null;
+    }, RESET_HOLD_DURATION);
+  });
+
+  const cancelReset = () => {
+    if (resetHoldTimer) {
+      clearTimeout(resetHoldTimer);
+      resetHoldTimer = null;
+    }
+    if (resetCountdownInterval) {
+      clearInterval(resetCountdownInterval);
+      resetCountdownInterval = null;
+    }
+    // Restore icon
+    if (resetBtn.innerHTML !== originalResetHtml) {
+      resetBtn.innerHTML = originalResetHtml;
+      resetBtn.style.color = "";
+      resetBtn.style.fontSize = "";
+      resetBtn.style.fontWeight = "";
+    }
+  };
+
+  resetBtn.addEventListener("mouseup", cancelReset);
+  resetBtn.addEventListener("mouseleave", cancelReset);
+}
 
 // Click outside panel to close (Discord-style)
-kbModal?.addEventListener("click", (e) => {
-  if (e.target === kbModal) closeKb();
+settingsModal?.addEventListener("click", (e) => {
+  if (e.target === settingsModal) closeSettings();
 });
 
+// Tab switching
+document.querySelectorAll(".settingsTab").forEach(tab => {
+  tab.addEventListener("click", () => {
+    const tabName = tab.getAttribute("data-tab");
+    if (!tabName) return;
+
+    // Update tab button active state
+    document.querySelectorAll(".settingsTab").forEach(t => t.classList.remove("active"));
+    tab.classList.add("active");
+
+    // Show corresponding content panel
+    document.querySelectorAll(".settingsTabContent").forEach(panel => {
+      panel.classList.remove("active");
+    });
+    const targetPanel = el("settingsTab" + tabName.charAt(0).toUpperCase() + tabName.slice(1));
+    if (targetPanel) targetPanel.classList.add("active");
+
+    // Update Reset Icon Tooltip
+    updateResetTooltip(tabName);
+
+    // Cancel any keybind editing when switching tabs
+    setEditing(null);
+  });
+});
+
+function updateResetTooltip(tabName) {
+  const resetBtn = el("keybindsReset");
+  if (!resetBtn) return;
+
+  const prettyName = tabName.charAt(0).toUpperCase() + tabName.slice(1);
+  const tooltip = `Hold to reset ${prettyName} to default`;
+
+  resetBtn.title = tooltip;
+  resetBtn.setAttribute("aria-label", tooltip);
+}
+
 // Populate UI + send binds to main on startup
-renderKeybindsUi();
-saveKeybinds(); // sends to main
+(async function init() {
+  renderKeybindsUi();
+  saveKeybinds(); // sends to main
+  updateFocusSizeUI(); // Apply saved focus size preference
+  updatePauseOnDrawUI(); // Load saved pause on draw preference
+  updateKeybindLegendToggleUI(); // Load saved keybind legend preference
+  await updateDriftCorrectionUI(); // Load saved drift preference
+  checkTwitchConstraints(true); // Force update active threshold from settings on startup
+})();
+
+// Display mode cycling
+const DISPLAY_MODES = ["windowed", "windowed-maximized", "fullscreen"];
+let currentDisplayModeIndex = 0;
+
+// Helper to format display mode name for UI (e.g., "windowed-maximized" -> "Windowed Maximized")
+function formatDisplayModeName(mode) {
+  return mode.split("-").map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
+}
+
+async function updateDisplayModeUI() {
+  const mode = await ipcRenderer.invoke("display:getMode");
+  currentDisplayModeIndex = DISPLAY_MODES.indexOf(mode);
+  if (currentDisplayModeIndex < 0) currentDisplayModeIndex = 0;
+
+  const valueEl = el("displayModeValue");
+  if (valueEl) {
+    valueEl.textContent = formatDisplayModeName(DISPLAY_MODES[currentDisplayModeIndex]);
+  }
+}
+
+async function cycleDisplayMode(direction) {
+  currentDisplayModeIndex = (currentDisplayModeIndex + direction + DISPLAY_MODES.length) % DISPLAY_MODES.length;
+  const newMode = DISPLAY_MODES[currentDisplayModeIndex];
+
+  await ipcRenderer.invoke("display:setMode", newMode);
+
+  const valueEl = el("displayModeValue");
+  if (valueEl) {
+    valueEl.textContent = formatDisplayModeName(newMode);
+  }
+}
+
+on("displayModeLeft", "click", () => cycleDisplayMode(-1));
+on("displayModeRight", "click", () => cycleDisplayMode(1));
+
+// Audio on load cycling
+const AUDIO_ON_LOAD_MODES = ["mute-all", "primary-only", "unmute-all"];
+const AUDIO_ON_LOAD_LABELS = {
+  "mute-all": "Mute All",
+  "primary-only": "Primary Video Only",
+  "unmute-all": "Unmute All"
+};
+let currentAudioOnLoadIndex = 0;
+
+async function updateAudioOnLoadUI() {
+  const mode = await ipcRenderer.invoke("audio:getOnLoad");
+  currentAudioOnLoadIndex = AUDIO_ON_LOAD_MODES.indexOf(mode);
+  if (currentAudioOnLoadIndex < 0) currentAudioOnLoadIndex = 0;
+
+  const valueEl = el("audioOnLoadValue");
+  if (valueEl) {
+    valueEl.textContent = AUDIO_ON_LOAD_LABELS[AUDIO_ON_LOAD_MODES[currentAudioOnLoadIndex]];
+  }
+}
+
+async function cycleAudioOnLoad(direction) {
+  currentAudioOnLoadIndex = (currentAudioOnLoadIndex + direction + AUDIO_ON_LOAD_MODES.length) % AUDIO_ON_LOAD_MODES.length;
+  const newMode = AUDIO_ON_LOAD_MODES[currentAudioOnLoadIndex];
+
+  await ipcRenderer.invoke("audio:setOnLoad", newMode);
+
+  const valueEl = el("audioOnLoadValue");
+  if (valueEl) {
+    valueEl.textContent = AUDIO_ON_LOAD_LABELS[newMode];
+  }
+}
+
+// Layout Preferences handling
+// Layout Preferences handling
+async function renderLayoutPreferences() {
+  const container = el("layoutPreferencesList");
+  if (!container) return;
+
+  const prefs = await ipcRenderer.invoke("layout:getPreferences");
+
+  // If container is empty, build the DOM (Initial Render)
+  if (container.children.length === 0) {
+    for (let count = 1; count <= 6; count++) {
+      const configs = LAYOUT_CONFIGS[count];
+      if (!configs) continue;
+
+      const row = document.createElement("div");
+      row.className = "settingsRow";
+
+      const label = document.createElement("span");
+      label.className = "settingsLabel";
+      label.textContent = count === 1 ? "1 Video" : `${count} Videos`;
+      // Fix vertical centering manual adjustment
+      label.style.marginTop = "-1px";
+      row.appendChild(label);
+
+      const group = document.createElement("div");
+      group.className = "layoutOptionGroup";
+
+      const options = Object.keys(configs).sort();
+      options.forEach(opt => {
+        const btn = document.createElement("button");
+        btn.className = "layoutPrefBtn";
+        // Store metadata for easier updates
+        btn.dataset.count = count;
+        btn.dataset.option = opt;
+
+        if ((prefs[count] || 'A') === opt) btn.classList.add("active");
+
+        btn.innerHTML = generateLayoutIcon(configs[opt]);
+        btn.title = `Layout ${opt}`;
+
+        btn.addEventListener("click", async () => {
+          await ipcRenderer.invoke("layout:setPreference", { count, option: opt });
+          renderLayoutPreferences(); // refresh UI (triggers update path)
+
+          // If we currently have this many videos loaded, update the grid immediately
+          if (currentFilledVideoCount === count) {
+            currentLayoutOption = opt;
+            updateLayoutOptionsUI(count);
+            applyLayout();
+          }
+        });
+        group.appendChild(btn);
+      });
+
+      row.appendChild(group);
+      container.appendChild(row);
+    }
+  } else {
+    // Container already populated, just update active states (Flicker-free update)
+    const buttons = container.querySelectorAll(".layoutPrefBtn");
+    buttons.forEach(btn => {
+      const c = parseInt(btn.dataset.count);
+      const o = btn.dataset.option;
+      const isActive = (prefs[c] || 'A') === o;
+
+      if (isActive) btn.classList.add("active");
+      else btn.classList.remove("active");
+    });
+  }
+}
+
+on("audioOnLoadLeft", "click", () => cycleAudioOnLoad(-1));
+on("audioOnLoadRight", "click", () => cycleAudioOnLoad(1));
+
+// Pause On Draw Logic
+let pauseOnDraw = true;
+
+async function updatePauseOnDrawUI() {
+  pauseOnDraw = await ipcRenderer.invoke("pause:getOnDraw");
+  const valueEl = el("pauseOnDrawValue");
+  if (valueEl) valueEl.textContent = pauseOnDraw ? "On" : "Off";
+}
+
+async function cyclePauseOnDraw() {
+  const newVal = !pauseOnDraw;
+  await ipcRenderer.invoke("pause:setOnDraw", newVal);
+  await updatePauseOnDrawUI();
+}
+
+on("pauseOnDrawLeft", "click", cyclePauseOnDraw);
+on("pauseOnDrawRight", "click", cyclePauseOnDraw);
+on("pauseOnDrawLeft", "click", cyclePauseOnDraw);
+on("pauseOnDrawRight", "click", cyclePauseOnDraw);
+
+
+// Drift Correction Logic
+let driftEnabled = true;
+
+async function updateDriftCorrectionUI() {
+  driftEnabled = await ipcRenderer.invoke("drift:getEnabled");
+
+  // Update settings toggle
+  const valueEl = el("driftEnabledValue");
+  if (valueEl) valueEl.textContent = driftEnabled ? "On" : "Off";
+
+  // Show/Hide top bar UI
+  const driftOptions = el("driftOptions");
+  if (driftOptions) {
+    driftOptions.style.display = driftEnabled ? "" : "none";
+  }
+
+  // Update inputs
+  const std = await ipcRenderer.invoke("drift:getStandard");
+  const tw = await ipcRenderer.invoke("drift:getTwitch");
+
+  if (driftStandardInput) {
+    driftStandardInput.disabled = !driftEnabled;
+    driftStandardInput.value = (parseFloat(std) || 0.25).toFixed(2);
+    el("stdDriftRow")?.classList.toggle("disabled", !driftEnabled);
+  }
+  if (driftTwitchInput) {
+    driftTwitchInput.disabled = !driftEnabled;
+    driftTwitchInput.value = (parseFloat(tw) || 1.0).toFixed(2);
+    el("twitchDriftRow")?.classList.toggle("disabled", !driftEnabled);
+  }
+
+  // Force update active threshold in top bar
+
+}
+
+const driftStandardInput = el("driftStandardInput");
+const driftTwitchInput = el("driftTwitchInput");
+
+// Bind input changes
+if (driftStandardInput) {
+  driftStandardInput.addEventListener("change", async (e) => {
+    let val = parseFloat(e.target.value);
+    if (!Number.isFinite(val) || val < 0.1) val = 0.1;
+    e.target.value = val.toFixed(2);
+    await ipcRenderer.invoke("drift:setStandard", val);
+    checkTwitchConstraints(true); // Force update active threshold
+  });
+}
+
+if (driftTwitchInput) {
+  driftTwitchInput.addEventListener("change", async (e) => {
+    let val = parseFloat(e.target.value);
+    if (!Number.isFinite(val) || val < 1.0) val = 1.0;
+    e.target.value = val.toFixed(2);
+    await ipcRenderer.invoke("drift:setTwitch", val);
+    checkTwitchConstraints(true); // Force update active threshold
+  });
+}
+
+async function cycleDriftCorrection() {
+  const newVal = !driftEnabled;
+  await ipcRenderer.invoke("drift:setEnabled", newVal);
+  await updateDriftCorrectionUI();
+  checkTwitchConstraints(true); // Force logic update
+}
+
+on("driftEnabledLeft", "click", cycleDriftCorrection);
+on("driftEnabledRight", "click", cycleDriftCorrection);
+
+// Focused Video Size cycling
+const FOCUS_SIZE_MODES = ["balanced", "focused", "dominant"];
+const FOCUS_SIZE_LABELS = {
+  "balanced": "Balanced (60 / 40)",
+  "focused": "Focused (70 / 30)",
+  "dominant": "Dominant (80 / 20)"
+};
+let currentFocusSizeIndex = 1; // Default to 'focused'
+
+async function updateFocusSizeUI() {
+  const size = await ipcRenderer.invoke("focus:getSize");
+  currentFocusSizeIndex = FOCUS_SIZE_MODES.indexOf(size);
+  if (currentFocusSizeIndex < 0) currentFocusSizeIndex = 1; // Default 'focused'
+
+  const valueEl = el("focusSizeValue");
+  if (valueEl) {
+    valueEl.textContent = FOCUS_SIZE_LABELS[FOCUS_SIZE_MODES[currentFocusSizeIndex]];
+  }
+  applyFocusSize(size);
+}
+
+async function cycleFocusSize(direction) {
+  currentFocusSizeIndex = (currentFocusSizeIndex + direction + FOCUS_SIZE_MODES.length) % FOCUS_SIZE_MODES.length;
+  const newSize = FOCUS_SIZE_MODES[currentFocusSizeIndex];
+
+  await ipcRenderer.invoke("focus:setSize", newSize);
+
+  const valueEl = el("focusSizeValue");
+  if (valueEl) {
+    valueEl.textContent = FOCUS_SIZE_LABELS[newSize];
+  }
+  applyFocusSize(newSize);
+}
+
+function applyFocusSize(size) {
+  const r = document.documentElement;
+  // Default 'focused' is 7fr 3fr (70/30)
+  if (size === "balanced") {
+    r.style.setProperty("--focus-main", "6fr");
+    r.style.setProperty("--focus-sub", "4fr");
+  } else if (size === "dominant") {
+    r.style.setProperty("--focus-main", "8fr");
+    r.style.setProperty("--focus-sub", "2fr");
+  } else {
+    // focused (default)
+    r.style.setProperty("--focus-main", "7fr");
+    r.style.setProperty("--focus-sub", "3fr");
+  }
+}
+
+on("focusSizeLeft", "click", () => cycleFocusSize(-1));
+on("focusSizeRight", "click", () => cycleFocusSize(1));
+
+// Update settings UI when settings modal opens
+// (Logic already integrated into openSettings)
 
 // Edit buttons
 document.querySelectorAll(".kbEdit").forEach(btn => {
@@ -3071,22 +3899,35 @@ window.addEventListener("resize", () => {
 applyLayout();
 startDriftLoop();
 startUiLoop();
+updateKeybindLegend();
 
 // Initialize version label (and enables update checks)
 initAppVersionUI();
 
 // Layout option button handlers
-on("layoutA", "click", () => {
+on("layoutA", "click", async () => {
   currentLayoutOption = 'A';
+  if (currentFilledVideoCount > 1) {
+    await ipcRenderer.invoke("layout:setPreference", { count: currentFilledVideoCount, option: 'A' });
+  }
   updateLayoutOptionsUI(currentFilledVideoCount);
+  applyLayout();
 });
-on("layoutB", "click", () => {
+on("layoutB", "click", async () => {
   currentLayoutOption = 'B';
+  if (currentFilledVideoCount > 1) {
+    await ipcRenderer.invoke("layout:setPreference", { count: currentFilledVideoCount, option: 'B' });
+  }
   updateLayoutOptionsUI(currentFilledVideoCount);
+  applyLayout();
 });
-on("layoutC", "click", () => {
+on("layoutC", "click", async () => {
   currentLayoutOption = 'C';
+  if (currentFilledVideoCount > 1) {
+    await ipcRenderer.invoke("layout:setPreference", { count: currentFilledVideoCount, option: 'C' });
+  }
   updateLayoutOptionsUI(currentFilledVideoCount);
+  applyLayout();
 });
 
 on("threshold", "change", () => {

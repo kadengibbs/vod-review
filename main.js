@@ -85,6 +85,24 @@ ipcMain.handle("feedback:submit", async (_event, { message }) => {
 
 let serverHandle = null;
 
+// Display mode persistence
+const settingsPath = path.join(app.getPath("userData"), "settings.json");
+
+function loadSettings() {
+  try {
+    if (fs.existsSync(settingsPath)) {
+      return JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+    }
+  } catch { }
+  return {};
+}
+
+function saveSettings(settings) {
+  try {
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+  } catch { }
+}
+
 // Dynamic keybinds (key -> action)
 // Dynamic keybinds (key -> action)
 let keyToAction = {};
@@ -95,9 +113,15 @@ async function createWindow() {
   // Start local server so YouTube sees an http(s) origin instead of file://
   serverHandle = await startServer(3000);
 
+  // Load saved display mode
+  const settings = loadSettings();
+  const savedDisplayMode = settings.displayMode || "windowed-maximized";
+  const isFullscreen = savedDisplayMode === "fullscreen";
+
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
+    fullscreen: isFullscreen,
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false
@@ -105,6 +129,11 @@ async function createWindow() {
     icon: path.join(__dirname, "icon.ico"),
     autoHideMenuBar: process.env.DEV_UI !== "1"
   });
+
+  // Apply windowed-maximized mode after window creation
+  if (savedDisplayMode === "windowed-maximized") {
+    win.maximize();
+  }
 
   if (process.env.DEV_UI !== "1") {
     win.setMenu(null);
@@ -152,6 +181,126 @@ async function createWindow() {
 
   ipcMain.on("app:setTyping", (_evt, val) => {
     isTyping = !!val;
+  });
+
+  // Display mode handlers
+  ipcMain.handle("display:getMode", () => {
+    // Return saved preference, NOT current window state
+    const settings = loadSettings();
+    return settings.displayMode || "windowed-maximized";
+  });
+
+  ipcMain.handle("display:setMode", (_evt, mode) => {
+    // Apply visual state
+    if (mode === "fullscreen") {
+      win.setFullScreen(true);
+    } else if (mode === "windowed-maximized") {
+      win.setFullScreen(false);
+      if (!win.isMaximized()) win.maximize();
+    } else {
+      // windowed
+      win.setFullScreen(false);
+      if (win.isMaximized()) win.unmaximize();
+    }
+
+    // Persist the setting explicitly
+    const settings = loadSettings();
+    settings.displayMode = mode;
+    saveSettings(settings);
+
+    return mode;
+  });
+
+  // Audio on load setting handlers
+  ipcMain.handle("audio:getOnLoad", () => {
+    const settings = loadSettings();
+    return settings.audioOnLoad || "mute-all";
+  });
+
+  ipcMain.handle("audio:setOnLoad", (_evt, mode) => {
+    const settings = loadSettings();
+    settings.audioOnLoad = mode;
+    saveSettings(settings);
+    return mode;
+  });
+
+  // Layout preference handlers
+  ipcMain.handle("layout:getPreferences", () => {
+    const settings = loadSettings();
+    return settings.layoutPreferences || {};
+  });
+
+  ipcMain.handle("layout:setPreference", (_evt, { count, option }) => {
+    const settings = loadSettings();
+    if (!settings.layoutPreferences) settings.layoutPreferences = {};
+    settings.layoutPreferences[count] = option;
+    saveSettings(settings);
+    return settings.layoutPreferences;
+  });
+
+  // Focused Video Size handlers
+  ipcMain.handle("focus:getSize", () => {
+    const settings = loadSettings();
+    return settings.focusSize || "focused"; // Default to 'focused' (70/30)
+  });
+
+  ipcMain.handle("focus:setSize", (_evt, size) => {
+    const settings = loadSettings();
+    settings.focusSize = size;
+    saveSettings(settings);
+    return size;
+  });
+
+  // Pause On Draw handlers
+  ipcMain.handle("pause:getOnDraw", () => {
+    const settings = loadSettings();
+    // Default to true if not set
+    return settings.pauseOnDraw === undefined ? true : settings.pauseOnDraw;
+  });
+
+  ipcMain.handle("pause:setOnDraw", (_evt, val) => {
+    const settings = loadSettings();
+    settings.pauseOnDraw = !!val;
+    saveSettings(settings);
+    return settings.pauseOnDraw;
+  });
+
+  // Drift persistence
+  ipcMain.handle("drift:getEnabled", () => {
+    const settings = loadSettings();
+    // Default to true
+    return settings.driftEnabled === undefined ? true : settings.driftEnabled;
+  });
+
+  ipcMain.handle("drift:setEnabled", (_evt, val) => {
+    const settings = loadSettings();
+    settings.driftEnabled = !!val;
+    saveSettings(settings);
+    return settings.driftEnabled;
+  });
+
+  ipcMain.handle("drift:getStandard", () => {
+    const settings = loadSettings();
+    return settings.driftStandard !== undefined ? settings.driftStandard : 0.25;
+  });
+
+  ipcMain.handle("drift:setStandard", (_evt, val) => {
+    const settings = loadSettings();
+    settings.driftStandard = Number(val);
+    saveSettings(settings);
+    return settings.driftStandard;
+  });
+
+  ipcMain.handle("drift:getTwitch", () => {
+    const settings = loadSettings();
+    return settings.driftTwitch !== undefined ? settings.driftTwitch : 1.0;
+  });
+
+  ipcMain.handle("drift:setTwitch", (_evt, val) => {
+    const settings = loadSettings();
+    settings.driftTwitch = Number(val);
+    saveSettings(settings);
+    return settings.driftTwitch;
   });
 }
 
