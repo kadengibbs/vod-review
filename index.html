@@ -60,13 +60,17 @@
     /* Global Focus Reset & Gradient Border */
     input:not([type="range"]):focus,
     select:focus,
-    button:focus,
+    button:not(.drawBarBtn):not(.settingsTab):focus,
     textarea:focus {
       outline: none;
       border: 1px solid transparent !important;
       background-image: linear-gradient(#111, #111), var(--active-gradient) !important;
       background-origin: border-box !important;
       background-clip: padding-box, border-box !important;
+    }
+
+    .drawBarBtn:focus {
+      outline: none;
     }
 
     /* Range inputs should not have the box border */
@@ -313,7 +317,7 @@
       padding: 10px 12px;
       background: #3a3a3a;
       border: 1px solid #2a2a2a;
-      height: 46px;
+      height: 44px;
     }
 
     .videoRow input[type="text"]:focus {
@@ -327,7 +331,7 @@
 
     .videoRow .browseBtn {
       padding: 0 14px;
-      height: 46px;
+      height: 44px;
       border-radius: 12px;
       background: #3a3a3a;
     }
@@ -346,7 +350,7 @@
       align-items: center;
       gap: 0px;
       width: 100%;
-      height: 46px;
+      height: 44px;
       background: #3a3a3a;
       border: 1px solid #2a2a2a;
       /* Explicit border to be replaced */
@@ -408,7 +412,7 @@
       border-radius: 12px;
       padding: 10px 12px;
       background: #2a2a2a;
-      height: 46px;
+      height: 44px;
       border: 1px solid #2a2a2a;
     }
 
@@ -513,6 +517,7 @@
       padding: var(--gap);
       overflow: hidden;
       min-height: 0;
+      position: relative;
     }
 
     .card {
@@ -526,9 +531,13 @@
     /* .playerWrap redefined below */
 
     /* Mute selection mode - show red border and enable clicking */
-    body.muteSelectMode .grid {
-      outline: 3px solid #ff4444;
-      outline-offset: -3px;
+    body.muteSelectMode .grid::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border: 3px solid #ff4444;
+      pointer-events: none;
+      z-index: 100;
     }
 
     body.muteSelectMode .card {
@@ -548,9 +557,13 @@
     }
 
     /* Focus selection mode - show blue outline and enable clicking */
-    body.focusSelectMode .grid {
-      outline: 3px solid #4488ff;
-      outline-offset: -3px;
+    body.focusSelectMode .grid::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border: 3px solid #4488ff;
+      pointer-events: none;
+      z-index: 100;
     }
 
     body.focusSelectMode .card {
@@ -581,9 +594,13 @@
       pointer-events: none;
     }
 
-    body.drawMode .grid {
-      outline: 3px solid #22cc44;
-      outline-offset: -3px;
+    body.drawMode .grid::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border: 3px solid #22cc44;
+      pointer-events: none;
+      z-index: 100;
     }
 
     /* ALLOW interaction when mouse tool is active */
@@ -780,6 +797,7 @@
       border-radius: 18px;
       padding: 22px 24px 0 24px;
       min-width: 320px;
+      outline: none;
     }
 
     .modalClose {
@@ -1260,6 +1278,21 @@
       gap: 6px;
     }
 
+    .kblItem.clickable {
+      cursor: pointer;
+      user-select: none;
+      transition: opacity 0.1s;
+    }
+
+    .kblItem.clickable:hover {
+      opacity: 0.8;
+      text-decoration: underline;
+    }
+
+    .kblItem.clickable:active {
+      transform: translateY(1px);
+    }
+
     .kblKey {
       background: #222;
       border: 1px solid #444;
@@ -1374,6 +1407,7 @@
         <button class="settingsTab active" data-tab="general">General</button>
         <button class="settingsTab" data-tab="layout">Layout</button>
         <button class="settingsTab" data-tab="keybinds">Keybinds</button>
+        <button class="settingsTab" data-tab="draw">Draw</button>
         <button id="keybindsReset" class="settingsTabClose" aria-label="Reset to defaults"
           title="Reset keybinds to defaults" style="margin-left: auto;">
           <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"
@@ -1409,18 +1443,10 @@
             <button class="cycleBtn" id="audioOnLoadRight">▶</button>
           </div>
         </div>
-        <div class="settingsRow">
-          <span class="settingsLabel">Pause On Draw</span>
-          <div class="settingsCycle">
-            <!-- Using cycle buttons for consistency, toggling On/Off -->
-            <button class="cycleBtn" id="pauseOnDrawLeft">◀</button>
-            <span class="cycleValue" id="pauseOnDrawValue">On</span>
-            <button class="cycleBtn" id="pauseOnDrawRight">▶</button>
-          </div>
-        </div>
+
         <div class="settingsRow">
           <div style="display: flex; align-items: center; gap: 2px;">
-            <span class="settingsLabel">Show Keybind Legend</span>
+            <span class="settingsLabel">Show Keybind Hints</span>
             <div id="keybindLegendHelp" class="help-icon"
               style="color: #666; cursor: pointer; display: flex; align-items: center;"
               data-help-text="Displays active keybinds at the top of the video screen">
@@ -1482,7 +1508,7 @@
             <span class="settingsLabel">Standard Drift Tolerance</span>
             <div id="stdDriftHelp" class="help-icon"
               style="color: #666; cursor: pointer; display: flex; align-items: center;"
-              data-help-text="Maximum allowed drift (in seconds) for YouTube and local videos">
+              data-help-text="Maximum allowed drift (in seconds) for YouTube and local videos. Minimum of 0.1 seconds">
               <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"
                 stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="12" cy="12" r="10"></circle>
@@ -1500,7 +1526,7 @@
             <span class="settingsLabel">Twitch Drift Tolerance</span>
             <div id="twitchDriftHelp" class="help-icon"
               style="color: #666; cursor: pointer; display: flex; align-items: center;"
-              data-help-text="Maximum allowed drift (in seconds) for Twitch VODs">
+              data-help-text="Maximum allowed drift (in seconds) for Twitch VODs. Minimum of 1.0 seconds">
               <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"
                 stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="12" cy="12" r="10"></circle>
@@ -1509,7 +1535,7 @@
               </svg>
             </div>
           </div>
-          <input type="number" id="driftTwitchInput" step="0.01" min="1.0" value="1.00" class="paramInput"
+          <input type="number" id="driftTwitchInput" step="0.01" min="1.0" value="1.50" class="paramInput"
             style="width: 60px; text-align: center;">
         </div>
       </div>
@@ -1736,6 +1762,46 @@
                 <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
               </svg>
             </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Draw tab content -->
+      <div id="settingsTabDraw" class="settingsTabContent">
+        <div class="settingsRow">
+          <span class="settingsLabel">Pause On Draw</span>
+          <div class="settingsCycle">
+            <!-- Using cycle buttons for consistency, toggling On/Off -->
+            <button class="cycleBtn" id="pauseOnDrawLeft">◀</button>
+            <span class="cycleValue" id="pauseOnDrawValue">On</span>
+            <button class="cycleBtn" id="pauseOnDrawRight">▶</button>
+          </div>
+        </div>
+
+        <div class="settingsRow">
+          <span class="settingsLabel">Default Color</span>
+          <div class="settingsCycle">
+            <button class="cycleBtn" id="defaultColorLeft">◀</button>
+            <span class="cycleValue" id="defaultColorValue">Red</span>
+            <button class="cycleBtn" id="defaultColorRight">▶</button>
+          </div>
+        </div>
+
+        <div class="settingsRow">
+          <span class="settingsLabel">Circle Draw Mode</span>
+          <div class="settingsCycle">
+            <button class="cycleBtn" id="circleModeLeft">◀</button>
+            <span class="cycleValue" id="circleModeValue">Drag to Corner</span>
+            <button class="cycleBtn" id="circleModeRight">▶</button>
+          </div>
+        </div>
+
+        <div class="settingsRow">
+          <span class="settingsLabel">Default Draw Tool</span>
+          <div class="settingsCycle">
+            <button class="cycleBtn" id="defaultToolLeft">◀</button>
+            <span class="cycleValue" id="defaultToolValue">Always Pencil</span>
+            <button class="cycleBtn" id="defaultToolRight">▶</button>
           </div>
         </div>
       </div>

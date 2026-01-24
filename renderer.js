@@ -253,22 +253,33 @@ function updateKeybindLegend() {
   if (!legend) return;
 
   const items = [
-    { key: keybinds.rew30, label: "-30s" },
-    { key: keybinds.rew5, label: "-5s" },
-    { key: keybinds.playpause, label: "Play/Pause" },
-    { key: keybinds.fwd5, label: "+5s" },
-    { key: keybinds.fwd30, label: "+30s" },
-    { key: keybinds.mute, label: "Mute" },
-    { key: keybinds.focus, label: "Focus" },
-    { key: keybinds.draw, label: "Draw" }
+    { key: keybinds.rew30, label: "-30s", action: "rew30" },
+    { key: keybinds.rew5, label: "-5s", action: "rew5" },
+    { key: keybinds.playpause, label: "Play/Pause", action: "playpause" },
+    { key: keybinds.fwd5, label: "+5s", action: "fwd5" },
+    { key: keybinds.fwd30, label: "+30s", action: "fwd30" },
+    { key: keybinds.mute, label: "Mute", action: "mute" },
+    { key: keybinds.focus, label: "Focus", action: "focus" },
+    { key: keybinds.draw, label: "Draw", action: "draw" }
   ];
 
-  legend.innerHTML = items.map(item => {
+  const legendHtml = items.map(item => {
     let k = String(item.key || "").toUpperCase();
     if (k === " ") k = "SPACE";
     if (k === "") k = "UNBOUND";
-    return `<div class="kblItem"><span class="kblKey">${k}</span> ${item.label}</div>`;
+    // Add clickable class for feedback
+    return `<div class="kblItem clickable" data-action="${item.action}"><span class="kblKey">${k}</span> ${item.label}</div>`;
   }).join("");
+
+  legend.innerHTML = legendHtml;
+
+  // Add click handlers
+  legend.querySelectorAll(".kblItem").forEach(item => {
+    item.addEventListener("click", () => {
+      const action = item.getAttribute("data-action");
+      if (action) triggerAction(action);
+    });
+  });
 
   // Only show if setting is true; logic for "zen mode only" is handled by CSS (body.zen)
   // But if showKeybindLegend is false, we want it hidden even in zen mode.
@@ -323,13 +334,8 @@ function setEditing(actionOrNull) {
 // Electron helpers (nodeIntegration is enabled)
 const { ipcRenderer, shell } = require("electron");
 
-// Custom keybinds forwarded from main process (works even when YouTube iframe has focus)
-ipcRenderer.on("app:customKeybind", (_evt, action) => {
-  if (!keybindsArmed || isLoadingScreenActive) return;
-
-  // Don’t trigger shortcuts while typing in inputs
-  if (isTypingTarget(document.activeElement)) return;
-
+// Reusable action trigger (for keybinds AND legend clicks)
+function triggerAction(action) {
   switch (action) {
     case "rew30": skipAll(-30); break;
     case "rew5": skipAll(-5); break;
@@ -340,6 +346,16 @@ ipcRenderer.on("app:customKeybind", (_evt, action) => {
     case "focus": if (!drawMode) toggleFocusSelectMode(); break;
     case "draw": toggleDrawMode(); break;
   }
+}
+
+// Custom keybinds forwarded from main process (works even when YouTube iframe has focus)
+ipcRenderer.on("app:customKeybind", (_evt, action) => {
+  if (!keybindsArmed || isLoadingScreenActive) return;
+
+  // Don’t trigger shortcuts while typing in inputs
+  if (isTypingTarget(document.activeElement)) return;
+
+  triggerAction(action);
 });
 
 
@@ -919,28 +935,36 @@ const DRAW_COLORS = [
   { name: "violet", hex: "#9400d3" }
 ];
 
+let currentDrawTool = "pencil"; // "pencil" | "arrow" | "circle"
+let dragStart = { x: 0, y: 0 };
+let imageSnapshot = null;
+
 function createDrawCanvas() {
   if (drawCanvas) return;
 
   const grid = el("grid");
   if (!grid) return;
 
+  const isZen = document.body.classList.contains("zen");
+  const showKeybinds = (typeof showKeybindLegend !== 'undefined') ? showKeybindLegend : true;
+  const topOffset = (isZen && showKeybinds) ? 27 : 0;
+
   drawCanvas = document.createElement("canvas");
   drawCanvas.id = "drawCanvas";
   drawCanvas.style.cssText = `
     position: fixed;
-    top: 0;
+    top: ${topOffset}px;
     left: 0;
     width: 100vw;
-    height: 100vh;
+    height: calc(100vh - ${topOffset}px);
     z-index: 1000;
     cursor: crosshair;
     pointer-events: auto;
   `;
   document.body.appendChild(drawCanvas);
 
-  drawCanvas.width = window.innerWidth;
-  drawCanvas.height = window.innerHeight;
+  drawCanvas.width = drawCanvas.clientWidth;
+  drawCanvas.height = drawCanvas.clientHeight;
 
   drawCtx = drawCanvas.getContext("2d");
   drawCtx.lineCap = "round";
@@ -959,8 +983,8 @@ function createDrawCanvas() {
 function resizeDrawCanvas() {
   if (!drawCanvas || !drawCtx) return;
   const imageData = drawCtx.getImageData(0, 0, drawCanvas.width, drawCanvas.height);
-  drawCanvas.width = window.innerWidth;
-  drawCanvas.height = window.innerHeight;
+  drawCanvas.width = drawCanvas.clientWidth;
+  drawCanvas.height = drawCanvas.clientHeight;
   drawCtx.putImageData(imageData, 0, 0);
   drawCtx.lineCap = "round";
   drawCtx.lineJoin = "round";
@@ -970,18 +994,86 @@ function resizeDrawCanvas() {
 
 function startDrawing(e) {
   isDrawing = true;
-  lastX = e.clientX;
-  lastY = e.clientY;
+  lastX = e.offsetX;
+  lastY = e.offsetY;
+
+  if (currentDrawTool === "arrow" || currentDrawTool === "circle") {
+    dragStart = { x: e.offsetX, y: e.offsetY };
+    if (drawCtx && drawCanvas) {
+      imageSnapshot = drawCtx.getImageData(0, 0, drawCanvas.width, drawCanvas.height);
+    }
+  }
 }
 
 function draw(e) {
   if (!isDrawing) return;
-  drawCtx.beginPath();
-  drawCtx.moveTo(lastX, lastY);
-  drawCtx.lineTo(e.clientX, e.clientY);
-  drawCtx.stroke();
-  lastX = e.clientX;
-  lastY = e.clientY;
+
+  if (currentDrawTool === "pencil") {
+    drawCtx.beginPath();
+    drawCtx.moveTo(lastX, lastY);
+    drawCtx.lineTo(e.offsetX, e.offsetY);
+    drawCtx.stroke();
+    lastX = e.offsetX;
+    lastY = e.offsetY;
+  } else if (currentDrawTool === "arrow") {
+    // Restore snapshot to clear previous frame of arrow preview
+    if (imageSnapshot) {
+      drawCtx.putImageData(imageSnapshot, 0, 0);
+    }
+    drawArrow(drawCtx, dragStart.x, dragStart.y, e.offsetX, e.offsetY);
+  } else if (currentDrawTool === "circle") {
+    if (imageSnapshot) {
+      drawCtx.putImageData(imageSnapshot, 0, 0);
+    }
+    drawCircle(drawCtx, dragStart.x, dragStart.y, e.offsetX, e.offsetY);
+  }
+}
+
+function drawArrow(ctx, fromX, fromY, toX, toY) {
+  const headLength = 20; // length of head in pixels
+  const dx = toX - fromX;
+  const dy = toY - fromY;
+  const angle = Math.atan2(dy, dx);
+
+  ctx.beginPath();
+  ctx.moveTo(fromX, fromY);
+  ctx.lineTo(toX, toY);
+  ctx.stroke();
+
+  // Arrow head
+  ctx.beginPath();
+  ctx.moveTo(toX, toY);
+  ctx.lineTo(toX - headLength * Math.cos(angle - Math.PI / 6), toY - headLength * Math.sin(angle - Math.PI / 6));
+  ctx.moveTo(toX, toY);
+  ctx.lineTo(toX - headLength * Math.cos(angle + Math.PI / 6), toY - headLength * Math.sin(angle + Math.PI / 6));
+  ctx.stroke();
+}
+
+function drawCircle(ctx, x1, y1, x2, y2) {
+  if (circleDrawMode === "grow") {
+    // "Drag to Grow": Center is start point, Radius is distance to current point
+    const r = Math.hypot(x2 - x1, y2 - y1);
+    ctx.beginPath();
+    ctx.arc(x1, y1, r, 0, 2 * Math.PI);
+    ctx.stroke();
+  } else {
+    // "Drag to Corner" (Default): Square bounding box
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const size = Math.max(Math.abs(dx), Math.abs(dy));
+
+    // Calculate center and radius for a circle inscribed in the square
+    const endX = x1 + (dx >= 0 ? size : -size);
+    const endY = y1 + (dy >= 0 ? size : -size);
+
+    const centerX = (x1 + endX) / 2;
+    const centerY = (y1 + endY) / 2;
+    const radius = size / 2;
+
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+    ctx.stroke();
+  }
 }
 
 function stopDrawing() {
@@ -1070,11 +1162,19 @@ function createColorSelector() {
   const existing = el("drawColorBar");
   if (existing) existing.remove();
 
+  // Apply Default Draw Tool Setting
+  if (typeof defaultDrawToolSetting !== 'undefined' && defaultDrawToolSetting !== "last") {
+    currentDrawTool = defaultDrawToolSetting;
+  }
+
+  /* Adjust top calculation based on Keybind Hints visibility */
+  const topPos = showKeybindLegend ? "30px" : "3px";
+
   const bar = document.createElement("div");
   bar.id = "drawColorBar";
   bar.style.cssText = `
     position: fixed;
-    top: 10px;
+    top: ${topPos};
     left: 50%;
     transform: translateX(-50%);
     z-index: 1001;
@@ -1086,9 +1186,183 @@ function createColorSelector() {
     box-shadow: 0 4px 12px rgba(0,0,0,0.5);
   `;
 
+  // --- Pencil Tool (Draw) ---
+  const pencilBtn = document.createElement("button");
+  pencilBtn.id = "drawToolPencil";
+  pencilBtn.className = "drawBarBtn";
+  pencilBtn.title = "Draw Tool";
+  pencilBtn.style.cssText = `
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: none;
+    background: #333;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.1s, background 0.1s;
+  `;
+  pencilBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>`;
+
+  // --- Arrow Tool (Draw) ---
+  const arrowBtn = document.createElement("button");
+  arrowBtn.id = "drawToolArrow";
+  arrowBtn.className = "drawBarBtn";
+  arrowBtn.title = "Arrow Tool";
+  arrowBtn.style.cssText = `
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: none;
+    background: #333;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.1s, background 0.1s;
+  `;
+  arrowBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="19" x2="19" y2="5"></line><polyline points="12 5 19 5 19 12"></polyline></svg>`;
+
+  // --- Circle Tool (Draw) ---
+  const circleBtn = document.createElement("button");
+  circleBtn.id = "drawToolCircle";
+  circleBtn.className = "drawBarBtn";
+  circleBtn.title = "Circle Tool";
+  circleBtn.style.cssText = `
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: none;
+    background: #333;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.1s, background 0.1s;
+  `;
+  circleBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle></svg>`;
+
+  const updateToolActiveState = () => {
+    // If interacting, no draw tools active
+    const isInteract = document.body.classList.contains("drawMouseActive");
+
+    // Interact Button
+    const mouseBtn = document.getElementById("drawToolMouse");
+    if (mouseBtn) {
+      if (isInteract) {
+        mouseBtn.style.border = "2px solid #fff";
+        mouseBtn.style.background = "#555";
+      } else {
+        mouseBtn.style.border = "none";
+        mouseBtn.style.background = "#333";
+      }
+    }
+
+    // Pencil Button
+    if (!isInteract && currentDrawTool === "pencil") {
+      pencilBtn.style.border = "2px solid #fff";
+      pencilBtn.style.background = "#555";
+    } else {
+      pencilBtn.style.border = "none";
+      pencilBtn.style.background = "#333";
+    }
+
+    // Arrow Button
+    if (!isInteract && currentDrawTool === "arrow") {
+      arrowBtn.style.border = "2px solid #fff";
+      arrowBtn.style.background = "#555";
+    } else {
+      arrowBtn.style.border = "none";
+      arrowBtn.style.background = "#333";
+    }
+
+    // Circle Button
+    if (!isInteract && currentDrawTool === "circle") {
+      circleBtn.style.border = "2px solid #fff";
+      circleBtn.style.background = "#555";
+    } else {
+      circleBtn.style.border = "none";
+      circleBtn.style.background = "#333";
+    }
+  };
+
+  pencilBtn.addEventListener("click", () => {
+    if (drawCanvas) {
+      drawCanvas.style.pointerEvents = "auto";
+      drawCanvas.style.cursor = "crosshair";
+    }
+    document.body.classList.remove("drawMouseActive");
+    currentDrawTool = "pencil";
+
+    updateToolActiveState();
+
+    // Re-highlight the active color
+    document.querySelectorAll(".drawColorBtn").forEach(b => {
+      b.style.borderColor = b.dataset.color === drawColor ? "#fff" : "transparent";
+    });
+  });
+
+  arrowBtn.addEventListener("click", () => {
+    if (drawCanvas) {
+      drawCanvas.style.pointerEvents = "auto";
+      drawCanvas.style.cursor = "crosshair";
+    }
+    document.body.classList.remove("drawMouseActive");
+    currentDrawTool = "arrow";
+
+    updateToolActiveState();
+
+    // Re-highlight the active color
+    document.querySelectorAll(".drawColorBtn").forEach(b => {
+      b.style.borderColor = b.dataset.color === drawColor ? "#fff" : "transparent";
+    });
+  });
+
+  circleBtn.addEventListener("click", () => {
+    if (drawCanvas) {
+      drawCanvas.style.pointerEvents = "auto";
+      drawCanvas.style.cursor = "crosshair";
+    }
+    document.body.classList.remove("drawMouseActive");
+    currentDrawTool = "circle";
+
+    updateToolActiveState();
+
+    // Re-highlight the active color
+    document.querySelectorAll(".drawColorBtn").forEach(b => {
+      b.style.borderColor = b.dataset.color === drawColor ? "#fff" : "transparent";
+    });
+  });
+
+  pencilBtn.addEventListener("mouseenter", () => {
+    if (pencilBtn.style.border === "none") {
+      pencilBtn.style.transform = "scale(1.15)";
+    }
+  });
+  pencilBtn.addEventListener("mouseleave", () => { pencilBtn.style.transform = "scale(1)"; });
+
+  arrowBtn.addEventListener("mouseenter", () => {
+    if (arrowBtn.style.border === "none") {
+      arrowBtn.style.transform = "scale(1.15)";
+    }
+  });
+  arrowBtn.addEventListener("mouseleave", () => { arrowBtn.style.transform = "scale(1)"; });
+
+  circleBtn.addEventListener("mouseenter", () => {
+    if (circleBtn.style.border === "none") {
+      circleBtn.style.transform = "scale(1.15)";
+    }
+  });
+  circleBtn.addEventListener("mouseleave", () => { circleBtn.style.transform = "scale(1)"; });
+
+  bar.appendChild(pencilBtn);
+  bar.appendChild(arrowBtn);
+  bar.appendChild(circleBtn);
+
   DRAW_COLORS.forEach(color => {
     const btn = document.createElement("button");
-    btn.className = "drawColorBtn";
+    btn.className = "drawColorBtn drawBarBtn";
     btn.dataset.color = color.hex;
     btn.title = color.name;
     btn.style.cssText = `
@@ -1116,13 +1390,12 @@ function createColorSelector() {
       document.querySelectorAll(".drawColorBtn").forEach(b => {
         b.style.borderColor = b.dataset.color === drawColor ? "#fff" : "transparent";
       });
-      // De-select mouse tool
-      const mouseBtn = document.getElementById("drawToolMouse");
-      if (mouseBtn) {
-        mouseBtn.style.background = "#333";
-        mouseBtn.style.border = "none";
-      }
-      document.body.classList.remove("drawMouseActive"); // <--- REMOVE CLASS
+      // Selecting a color activates drawing mode, default to existing tool or pencil?
+      document.body.classList.remove("drawMouseActive");
+
+      // Keep current tool if it was already selected, otherwise default to pencil if coming from Interact?
+      // Actually, variable persists, so we just stick with currentDrawTool.
+      updateToolActiveState();
     });
 
     btn.addEventListener("mouseenter", () => { btn.style.transform = "scale(1.15)"; });
@@ -1131,9 +1404,13 @@ function createColorSelector() {
     bar.appendChild(btn);
   });
 
+  // Set initial state
+  setTimeout(() => updateToolActiveState(), 0);
+
   // --- Mouse Tool (Interact) ---
   const mouseBtn = document.createElement("button");
   mouseBtn.id = "drawToolMouse";
+  mouseBtn.className = "drawBarBtn";
   mouseBtn.title = "Interact";
   mouseBtn.style.cssText = `
     width: 28px;
@@ -1160,11 +1437,9 @@ function createColorSelector() {
     document.querySelectorAll(".drawColorBtn").forEach(b => {
       b.style.borderColor = "transparent";
     });
-    // Highlight this button
-    mouseBtn.style.background = "#555";
-    mouseBtn.style.border = "2px solid #fff";
 
     document.body.classList.add("drawMouseActive"); // <--- ADD CLASS
+    updateToolActiveState();
   });
 
   mouseBtn.addEventListener("mouseenter", () => {
@@ -1183,6 +1458,7 @@ function createColorSelector() {
   // Helper to create action buttons
   const makeActionBtn = (title, iconPath, onClick) => {
     const btn = document.createElement("button");
+    btn.className = "drawBarBtn";
     btn.title = title;
     btn.style.cssText = `
       width: 28px;
@@ -1717,7 +1993,7 @@ async function checkTwitchConstraints(force = false) {
   let targetVal;
   if (hasTwitch) {
     targetVal = await ipcRenderer.invoke("drift:getTwitch");
-    if (!targetVal) targetVal = 1.0;
+    if (!targetVal) targetVal = 1.5;
     tInput.min = "1.0";
   } else {
     targetVal = await ipcRenderer.invoke("drift:getStandard");
@@ -1991,6 +2267,10 @@ const compactVideoRows = () => {
     block.dataset.idx = String(index);
     const title = block.querySelector(".videoTitle");
     if (title) title.textContent = `Video ${index + 1}`;
+
+    // Also update the first field label which contains "Video X"
+    const label = block.querySelector(".fieldLabel");
+    if (label) label.textContent = `Video ${index + 1}`;
   });
 };
 
@@ -2502,6 +2782,32 @@ async function loadVideos() {
       holder.id = `p${i}-${Date.now()}`;
       wrap.appendChild(holder);
       holders.push(holder.id);
+
+      // Block top bar interactions (Title, Share, Watch Later)
+      // Block top bar interactions (Title, Share, Watch Later)
+      const topBlocker = document.createElement("div");
+      topBlocker.className = "ytTopBlocker";
+      // Use default cursor (Normal Select) instead of pointer
+      topBlocker.style.cssText = "position: absolute; top: 0; left: 0; width: 100%; height: 60px; z-index: 10; cursor: default;";
+
+      const kill = e => { e.preventDefault(); e.stopPropagation(); };
+
+      topBlocker.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const p = players[i];
+        if (p) {
+          try {
+            const s = p.getPlayerState();
+            // 1 = playing, 2 = paused/ended/unk
+            if (s === 1) p.pauseVideo();
+            else p.playVideo();
+          } catch (err) { }
+        }
+      });
+
+      ["dblclick", "mousedown", "mouseup", "contextmenu"].forEach(evt => topBlocker.addEventListener(evt, kill));
+      wrap.appendChild(topBlocker);
 
       // Check controls setting
       const showControls = el("ytControlsToggle")?.checked || false;
@@ -3142,12 +3448,6 @@ async function resetGeneralSettings() {
   const audioEl = el("audioOnLoadValue");
   if (audioEl) audioEl.textContent = "Mute All";
 
-  // Pause On Draw -> On (true)
-  await ipcRenderer.invoke("pause:setOnDraw", true);
-  pauseOnDraw = true;
-  const pauseEl = el("pauseOnDrawValue");
-  if (pauseEl) pauseEl.textContent = "On";
-
   // Show Keybind Legend -> On (true)
   showKeybindLegend = true;
   saveShowKeybindLegend();
@@ -3159,7 +3459,7 @@ async function resetGeneralSettings() {
 
   // Set drift tolerance values
   await ipcRenderer.invoke("drift:setStandard", 0.25);
-  await ipcRenderer.invoke("drift:setTwitch", 1.0);
+  await ipcRenderer.invoke("drift:setTwitch", 1.5);
 
   // Update UI for drift correction toggle
   const driftValEl = el("driftEnabledValue");
@@ -3183,7 +3483,7 @@ async function resetGeneralSettings() {
   }
 
   if (twInput) {
-    twInput.value = "1.00";
+    twInput.value = "1.50";
     twInput.disabled = false;
     twInput.readOnly = false;
     twInput.style.pointerEvents = "";
@@ -3253,6 +3553,39 @@ function resetKeybindSettings() {
 }
 
 /**
+ * Reset Draw settings to defaults:
+ * - Pause On Draw: On (true)
+ * - Default Color: Red
+ */
+async function resetDrawSettings() {
+  // Pause On Draw -> On (true)
+  await ipcRenderer.invoke("pause:setOnDraw", true);
+  pauseOnDraw = true;
+  const pauseEl = el("pauseOnDrawValue");
+  if (pauseEl) pauseEl.textContent = "On";
+
+  // Default Color -> Red (index 1)
+  defaultDrawColorIndex = 1;
+  await ipcRenderer.invoke("draw:setDefaultColor", "#ff0000");
+  drawColor = "#ff0000";
+  if (drawCtx) drawCtx.strokeStyle = drawColor;
+  const colorEl = el("defaultColorValue");
+  if (colorEl) colorEl.textContent = "Red";
+
+  // Circle Draw Mode -> Drag to Corner (corner)
+  await ipcRenderer.invoke("draw:setCircleMode", "corner");
+  circleDrawMode = "corner";
+  const cmEl = el("circleModeValue");
+  if (cmEl) cmEl.textContent = "Drag to Corner";
+
+  // Default Draw Tool -> Always Pencil (pencil)
+  await ipcRenderer.invoke("draw:setDefaultTool", "pencil");
+  defaultDrawToolSetting = "pencil";
+  const toolEl = el("defaultToolValue");
+  if (toolEl) toolEl.textContent = "Always Pencil";
+}
+
+/**
  * Get the currently active settings tab name
  * Returns: "general" | "layout" | "keybinds"
  */
@@ -3307,6 +3640,9 @@ if (resetBtn) {
           break;
         case "keybinds":
           resetKeybindSettings();
+          break;
+        case "draw":
+          await resetDrawSettings();
           break;
       }
 
@@ -3386,12 +3722,117 @@ function updateResetTooltip(tabName) {
   resetBtn.setAttribute("aria-label", tooltip);
 }
 
+// Default Draw Color Logic
+let defaultDrawColorIndex = 1; // Default Red
+
+async function updateDefaultDrawColorUI() {
+  const hex = await ipcRenderer.invoke("draw:getDefaultColor");
+
+  // Find index
+  const idx = DRAW_COLORS.findIndex(c => c.hex.toLowerCase() === (hex || "").toLowerCase());
+  // If not found, default to Red (1)
+  defaultDrawColorIndex = idx >= 0 ? idx : 1;
+  const color = DRAW_COLORS[defaultDrawColorIndex];
+
+  const label = el("defaultColorValue");
+  if (label) label.textContent = color.name.charAt(0).toUpperCase() + color.name.slice(1);
+
+  return color.hex;
+}
+
+async function cycleDefaultDrawColor(direction) {
+  defaultDrawColorIndex = (defaultDrawColorIndex + direction + DRAW_COLORS.length) % DRAW_COLORS.length;
+  const newColor = DRAW_COLORS[defaultDrawColorIndex];
+
+  await ipcRenderer.invoke("draw:setDefaultColor", newColor.hex);
+
+  // Apply immediately to current session
+  drawColor = newColor.hex;
+  if (drawCtx) drawCtx.strokeStyle = drawColor;
+
+  const label = el("defaultColorValue");
+  if (label) label.textContent = newColor.name.charAt(0).toUpperCase() + newColor.name.slice(1);
+}
+
+on("defaultColorLeft", "click", () => cycleDefaultDrawColor(-1));
+on("defaultColorRight", "click", () => cycleDefaultDrawColor(1));
+
+
+// Circle Draw Mode Logic
+let circleDrawMode = "corner"; // "corner" | "grow"
+
+async function updateCircleDrawModeUI() {
+  circleDrawMode = await ipcRenderer.invoke("draw:getCircleMode");
+  const label = el("circleModeValue");
+  if (label) label.textContent = circleDrawMode === "grow" ? "Drag to Grow" : "Drag to Corner";
+}
+
+async function cycleCircleDrawMode() {
+  const newVal = circleDrawMode === "corner" ? "grow" : "corner";
+  await ipcRenderer.invoke("draw:setCircleMode", newVal);
+  circleDrawMode = newVal;
+  const label = el("circleModeValue");
+  if (label) label.textContent = newVal === "grow" ? "Drag to Grow" : "Drag to Corner";
+}
+
+on("circleModeLeft", "click", cycleCircleDrawMode);
+on("circleModeRight", "click", cycleCircleDrawMode);
+
+// Default Draw Tool Logic
+const DEFAULT_DRAW_TOOL_MODES = ["pencil", "arrow", "circle", "last"];
+const DEFAULT_DRAW_TOOL_LABELS = {
+  "pencil": "Always Pencil",
+  "arrow": "Always Arrow",
+  "circle": "Always Circle",
+  "last": "Last Selected"
+};
+let defaultDrawToolSetting = "pencil"; // stored preference
+let defaultDrawToolIndex = 0;
+
+async function updateDefaultDrawToolUI() {
+  defaultDrawToolSetting = await ipcRenderer.invoke("draw:getDefaultTool");
+  defaultDrawToolIndex = DEFAULT_DRAW_TOOL_MODES.indexOf(defaultDrawToolSetting);
+  if (defaultDrawToolIndex < 0) defaultDrawToolIndex = 0;
+
+  const label = el("defaultToolValue");
+  if (label) label.textContent = DEFAULT_DRAW_TOOL_LABELS[DEFAULT_DRAW_TOOL_MODES[defaultDrawToolIndex]];
+}
+
+async function cycleDefaultDrawTool(direction) {
+  defaultDrawToolIndex = (defaultDrawToolIndex + direction + DEFAULT_DRAW_TOOL_MODES.length) % DEFAULT_DRAW_TOOL_MODES.length;
+  const newValue = DEFAULT_DRAW_TOOL_MODES[defaultDrawToolIndex];
+
+  await ipcRenderer.invoke("draw:setDefaultTool", newValue);
+  defaultDrawToolSetting = newValue;
+
+  const label = el("defaultToolValue");
+  if (label) label.textContent = DEFAULT_DRAW_TOOL_LABELS[newValue];
+}
+
+on("defaultToolLeft", "click", () => cycleDefaultDrawTool(-1));
+on("defaultToolRight", "click", () => cycleDefaultDrawTool(1));
+
+
 // Populate UI + send binds to main on startup
 (async function init() {
   renderKeybindsUi();
   saveKeybinds(); // sends to main
   updateFocusSizeUI(); // Apply saved focus size preference
   updatePauseOnDrawUI(); // Load saved pause on draw preference
+
+  // Load Default Draw Color and Apply it as current drawColor
+  const defColor = await updateDefaultDrawColorUI();
+  if (defColor) {
+    drawColor = defColor;
+    // Also update UI states? 
+    // Usually draw color UI is built in createDrawCanvas or createColorSelector. 
+    // Does createColorSelector run on init? No. It runs when Draw is toggled.
+    // So setting global variable is enough.
+  }
+
+  await updateCircleDrawModeUI(); // Load saved circle mode preference
+  await updateDefaultDrawToolUI(); // Load saved default tool preference
+
   updateKeybindLegendToggleUI(); // Load saved keybind legend preference
   await updateDriftCorrectionUI(); // Load saved drift preference
   checkTwitchConstraints(true); // Force update active threshold from settings on startup
@@ -3586,7 +4027,7 @@ async function updateDriftCorrectionUI() {
   }
   if (driftTwitchInput) {
     driftTwitchInput.disabled = !driftEnabled;
-    driftTwitchInput.value = (parseFloat(tw) || 1.0).toFixed(2);
+    driftTwitchInput.value = (parseFloat(tw) || 1.5).toFixed(2);
     el("twitchDriftRow")?.classList.toggle("disabled", !driftEnabled);
   }
 
@@ -3869,6 +4310,12 @@ window.addEventListener("keydown", e => {
   if (isLoadingScreenActive) return;
 
   if (e.key === "Escape") {
+    // Close Settings Modal if open
+    if (settingsModal && settingsModal.classList.contains("open")) {
+      closeSettings();
+      return;
+    }
+
     // Exit all interactive modes
     if (muteSelectMode) {
       muteSelectMode = false;

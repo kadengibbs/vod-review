@@ -139,6 +139,11 @@ async function createWindow() {
     win.setMenu(null);
   }
 
+  // Prevent new windows (e.g. from YouTube title clicks)
+  win.webContents.setWindowOpenHandler(() => {
+    return { action: "deny" };
+  });
+
   win.loadURL(`http://127.0.0.1:${serverHandle.port}/index.html`);
   // Custom keybinds: capture at the webContents level so it works even when a YouTube iframe is focused
   win.webContents.on("before-input-event", (event, input) => {
@@ -293,7 +298,7 @@ async function createWindow() {
 
   ipcMain.handle("drift:getTwitch", () => {
     const settings = loadSettings();
-    return settings.driftTwitch !== undefined ? settings.driftTwitch : 1.0;
+    return settings.driftTwitch !== undefined ? settings.driftTwitch : 1.5;
   });
 
   ipcMain.handle("drift:setTwitch", (_evt, val) => {
@@ -301,6 +306,46 @@ async function createWindow() {
     settings.driftTwitch = Number(val);
     saveSettings(settings);
     return settings.driftTwitch;
+  });
+
+  // Default Draw Color persistence
+  ipcMain.handle("draw:getDefaultColor", () => {
+    const settings = loadSettings();
+    return settings.drawDefaultColor !== undefined ? settings.drawDefaultColor : "#ff0000";
+  });
+
+  ipcMain.handle("draw:setDefaultColor", (_evt, val) => {
+    const settings = loadSettings();
+    settings.drawDefaultColor = val;
+    saveSettings(settings);
+    return settings.drawDefaultColor;
+  });
+
+  // Circle Draw Mode persistence
+  ipcMain.handle("draw:getCircleMode", () => {
+    const settings = loadSettings();
+    // Default "corner"
+    return settings.drawCircleMode !== undefined ? settings.drawCircleMode : "corner";
+  });
+
+  ipcMain.handle("draw:setCircleMode", (_evt, val) => {
+    const settings = loadSettings();
+    settings.drawCircleMode = val;
+    saveSettings(settings);
+    return settings.drawCircleMode;
+  });
+
+  // Default Draw Tool persistence
+  ipcMain.handle("draw:getDefaultTool", () => {
+    const settings = loadSettings();
+    return settings.drawDefaultTool !== undefined ? settings.drawDefaultTool : "pencil";
+  });
+
+  ipcMain.handle("draw:setDefaultTool", (_evt, val) => {
+    const settings = loadSettings();
+    settings.drawDefaultTool = val;
+    saveSettings(settings);
+    return settings.drawDefaultTool;
   });
 }
 
