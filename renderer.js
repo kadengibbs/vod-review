@@ -51,6 +51,13 @@ let redoHistory = [];  // Stack for redo
 let focusMode = false;
 let focusedPlayerIndex = null;
 
+// Recording state
+let isRecording = false;
+let mediaRecorder = null;
+let recordedChunks = [];
+let recordingStream = null;
+let recordingStartTime = 0;
+
 // Layout options: defines row structure for each video count and option
 // Each entry is an array of { count, centered } where count = videos in that row
 const LAYOUT_CONFIGS = {
@@ -176,7 +183,8 @@ const DEFAULT_BINDS = {
   fwd30: "l",
   mute: "m",
   focus: "f",
-  draw: "d"
+  draw: "d",
+  record: "c"
 };
 
 let keybinds = loadKeybinds();
@@ -243,6 +251,7 @@ function renderKeybindsUi() {
   set("kb_key_mute", keybinds.mute);
   set("kb_key_focus", keybinds.focus);
   set("kb_key_draw", keybinds.draw);
+  set("kb_key_record", keybinds.record);
 
   updateKeybindLegend();
 }
@@ -260,7 +269,8 @@ function updateKeybindLegend() {
     { key: keybinds.fwd30, label: "+30s", action: "fwd30" },
     { key: keybinds.mute, label: "Mute", action: "mute" },
     { key: keybinds.focus, label: "Focus", action: "focus" },
-    { key: keybinds.draw, label: "Draw", action: "draw" }
+    { key: keybinds.draw, label: "Draw", action: "draw" },
+    { key: keybinds.record, label: "Record", action: "record" }
   ];
 
   const legendHtml = items.map(item => {
@@ -345,6 +355,7 @@ function triggerAction(action) {
     case "mute": if (!drawMode) toggleMuteSelectMode(); break;
     case "focus": if (!drawMode) toggleFocusSelectMode(); break;
     case "draw": toggleDrawMode(); break;
+    case "record": toggleRecording(); break;
   }
 }
 
@@ -357,6 +368,216 @@ ipcRenderer.on("app:customKeybind", (_evt, action) => {
 
   triggerAction(action);
 });
+
+// ---- Recording Functions ----
+
+function toggleRecording() {
+  if (isRecording) {
+    stopRecording();
+  } else {
+    startRecording();
+  }
+}
+
+async function startRecording() {
+  if (isRecording) return;
+
+  try {
+    // Get our window's media source ID directly from main process
+    const result = await ipcRenderer.invoke("recording:getOwnMediaSourceId");
+
+    if (!result.success) {
+      showRecordingError("Could not get window for capture: " + (result.error || "Unknown error"));
+      return;
+    }
+
+    const mediaSourceId = result.id;
+    console.log("Capturing window with media source ID:", mediaSourceId);
+
+    // Request media stream for this specific window at 1080p60
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        mandatory: {
+          chromeMediaSource: "desktop",
+          chromeMediaSourceId: mediaSourceId
+        }
+      },
+      video: {
+        mandatory: {
+          chromeMediaSource: "desktop",
+          chromeMediaSourceId: mediaSourceId,
+          minWidth: 1920,
+          maxWidth: 1920,
+          minHeight: 1080,
+          maxHeight: 1080,
+          minFrameRate: 60,
+          maxFrameRate: 60
+        }
+      }
+    });
+
+    recordingStream = stream;
+    recordedChunks = [];
+
+    // Create MediaRecorder with WebM format (we'll convert to MP4 after)
+    const mimeType = "video/webm;codecs=vp9,opus";
+    if (!MediaRecorder.isTypeSupported(mimeType)) {
+      // Fallback to vp8 if vp9 not supported
+      mediaRecorder = new MediaRecorder(stream, { mimeType: "video/webm" });
+    } else {
+      mediaRecorder = new MediaRecorder(stream, { mimeType });
+    }
+
+    mediaRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        recordedChunks.push(event.data);
+      }
+    };
+
+    mediaRecorder.onstop = async () => {
+      // Process the recording
+      await processRecording();
+    };
+
+    mediaRecorder.onerror = (event) => {
+      console.error("MediaRecorder error:", event.error);
+      showRecordingError("Recording error: " + event.error.message);
+      cleanupRecording();
+    };
+
+    // Start recording
+    mediaRecorder.start(1000); // Collect data every second
+    isRecording = true;
+    recordingStartTime = Date.now();
+    updateRecordingIndicator();
+
+    console.log("Recording started");
+  } catch (err) {
+    console.error("Failed to start recording:", err);
+    showRecordingError("Failed to start recording: " + err.message);
+    cleanupRecording();
+  }
+}
+
+function stopRecording() {
+  if (!isRecording || !mediaRecorder) return;
+
+  try {
+    mediaRecorder.stop();
+    isRecording = false;
+    updateRecordingIndicator();
+    console.log("Recording stopped, processing...");
+  } catch (err) {
+    console.error("Error stopping recording:", err);
+    showRecordingError("Error stopping recording: " + err.message);
+    cleanupRecording();
+  }
+}
+
+let pendingClose = false;
+
+window.onbeforeunload = (e) => {
+  if (isRecording) {
+    // Cancel the close
+    e.returnValue = false;
+    pendingClose = true;
+    console.log("App closing while recording - initiating stop and save sequence...");
+    stopRecording();
+  }
+};
+
+async function processRecording() {
+  if (recordedChunks.length === 0) {
+    showRecordingError("No recording data captured");
+    cleanupRecording();
+    return;
+  }
+
+  try {
+    setStatus("Processing recording...", false);
+
+    // Create blob from recorded chunks
+    const blob = new Blob(recordedChunks, { type: "video/webm" });
+
+    // Fix WebM duration metadata (MediaRecorder doesn't set it properly)
+    const fixWebmDuration = require("fix-webm-duration");
+    const duration = Date.now() - recordingStartTime;
+    const fixedBlob = await fixWebmDuration(blob, duration, { logger: false });
+
+    // Get the Videos folder path
+    const videosPath = await ipcRenderer.invoke("recording:getVideosPath");
+
+    // Generate filename with timestamp
+    const now = new Date();
+    const timestamp = now.toISOString()
+      .replace(/[:.]/g, "-")
+      .replace("T", "_")
+      .slice(0, 19);
+    const baseName = `VODReview_Recording_${timestamp}`;
+
+    // Write WebM to temp file first
+    const tempWebmPath = require("path").join(videosPath, `${baseName}_temp.webm`);
+    const mp4Path = require("path").join(videosPath, `${baseName}.mp4`);
+
+    // Convert fixed blob to buffer and write to file
+    const arrayBuffer = await fixedBlob.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    const fs = require("fs");
+    fs.writeFileSync(tempWebmPath, buffer);
+
+    console.log("WebM saved to:", tempWebmPath);
+    console.log("Converting to MP4...");
+
+    // Transcode to MP4 - if closing, trigger and forget, trusting main process to finish
+    const transcodePromise = ipcRenderer.invoke("recording:transcode", {
+      webmPath: tempWebmPath,
+      mp4Path: mp4Path
+    });
+
+    if (pendingClose) {
+      console.log("App was closing, transcode handed off to main process. Goodbye!");
+      window.onbeforeunload = null; // Unbind handler so we can close
+      window.close();
+    } else {
+      const result = await transcodePromise;
+      if (result.success) {
+        setStatus(`Recording saved: ${baseName}.mp4`, false, 5000);
+        console.log("MP4 saved to:", result.path);
+      } else {
+        throw new Error("Transcode failed");
+      }
+    }
+  } catch (err) {
+    console.error("Error processing recording:", err);
+    showRecordingError("Error saving recording: " + err.message);
+  } finally {
+    cleanupRecording();
+  }
+}
+
+function cleanupRecording() {
+  if (recordingStream) {
+    recordingStream.getTracks().forEach(track => track.stop());
+    recordingStream = null;
+  }
+  mediaRecorder = null;
+  recordedChunks = [];
+  recordingStartTime = 0;
+  isRecording = false;
+  updateRecordingIndicator();
+}
+
+function updateRecordingIndicator() {
+  const indicator = document.getElementById("recordingIndicator");
+  if (indicator) {
+    indicator.style.display = isRecording ? "flex" : "none";
+  }
+}
+
+function showRecordingError(msg) {
+  setStatus(msg, true, 5000);
+}
 
 
 let currentAppVersion = null;
@@ -2701,9 +2922,9 @@ async function loadVideos() {
     // i is the card index (0-based), so i === 0 means primary video
     let initialVolume = 0; // default mute-all
     if (audioOnLoad === "unmute-all") {
-      initialVolume = 50;
+      initialVolume = 100;
     } else if (audioOnLoad === "primary-only" && i === 0) {
-      initialVolume = 50;
+      initialVolume = 100;
     }
     range.value = initialVolume;
 

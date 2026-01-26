@@ -133,6 +133,12 @@
       background-clip: padding-box, border-box !important;
     }
 
+    /* Disable gradient focus for layout container (user request) */
+    #layoutOptions:focus-within {
+      border: 1px solid var(--border) !important;
+      background-image: none !important;
+    }
+
     .chip label {
       height: 100%;
       display: inline-flex;
@@ -1306,6 +1312,53 @@
       line-height: 11px;
       font-family: inherit;
     }
+
+    /* Recording Indicator */
+    #recordingIndicator {
+      position: fixed;
+      top: 13px;
+      right: 140px;
+      /* Positioned left of volume controls */
+      z-index: 10000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      background: transparent;
+      border: none;
+      box-shadow: none;
+      padding: 0;
+      pointer-events: none;
+    }
+
+    /* Fix position when Keybind Hints are shown in Zen Mode */
+    body.zen:not(.keybind-legend-hidden) #recordingIndicator {
+      top: 35px;
+    }
+
+    .recordingDot {
+      width: 12px;
+      height: 12px;
+      background: #ff0000;
+      border-radius: 50%;
+      animation: recordingPulse 1s ease-in-out infinite;
+      box-shadow: 0 0 6px #ff0000;
+    }
+
+    @keyframes recordingPulse {
+
+      0%,
+      100% {
+        opacity: 1;
+        transform: scale(1);
+      }
+
+      50% {
+        opacity: 0.5;
+        transform: scale(0.85);
+      }
+    }
   </style>
 </head>
 
@@ -1315,6 +1368,10 @@
   </div>
   <!-- Custom Tooltip Element -->
   <div id="customTooltip" class="custom-tooltip"></div>
+  <!-- Recording Indicator -->
+  <div id="recordingIndicator">
+    <div class="recordingDot"></div>
+  </div>
   <div class="app">
     <div class="topbar">
       <!-- required order -->
@@ -1756,6 +1813,20 @@
           <div class="settingsCycle">
             <div class="kbKey" id="kb_key_draw">D</div>
             <button class="kbEdit" data-action="draw" title="Edit">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 20h9"></path>
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="settingsRow kbRow" data-action="record">
+          <span class="settingsLabel">Toggle Recording</span>
+          <div class="settingsCycle">
+            <div class="kbKey" id="kb_key_record">C</div>
+            <button class="kbEdit" data-action="record" title="Edit">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M12 20h9"></path>

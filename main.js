@@ -1,5 +1,6 @@
-const { app, BrowserWindow, ipcMain } = require("electron");
+const { app, BrowserWindow, ipcMain, desktopCapturer } = require("electron");
 const fs = require("fs");
+const os = require("os");
 if (process.platform === 'win32') {
   app.setAppUserModelId("com.vodreview.app");
 }
@@ -8,6 +9,14 @@ const { URL } = require("url");
 const { spawn } = require("child_process");
 const path = require("path");
 const { startServer } = require("./server");
+
+// FFmpeg path for transcoding
+let ffmpegPath;
+try {
+  ffmpegPath = require("ffmpeg-static");
+} catch (e) {
+  console.error("ffmpeg-static not found:", e);
+}
 
 // Existing handler (keep)
 ipcMain.handle("app:getVersion", () => app.getVersion());
@@ -81,6 +90,139 @@ ipcMain.handle("feedback:submit", async (_event, { message }) => {
   return { success: true };
 });
 
+// ---- Recording Feature IPC Handlers ----
+
+// Get our own window's media source ID directly (most reliable method)
+ipcMain.handle("recording:getOwnMediaSourceId", async (_event) => {
+  try {
+    const { BrowserWindow } = require("electron");
+    const focusedWindow = BrowserWindow.getFocusedWindow();
+
+    if (!focusedWindow) {
+      // If no focused window, get the first window
+      const allWindows = BrowserWindow.getAllWindows();
+      if (allWindows.length > 0) {
+        const mediaSourceId = allWindows[0].getMediaSourceId();
+        return { success: true, id: mediaSourceId };
+      }
+      return { success: false, error: "No window found" };
+    }
+
+    // Get the media source ID for our window
+    const mediaSourceId = focusedWindow.getMediaSourceId();
+    return { success: true, id: mediaSourceId };
+  } catch (err) {
+    console.error("Error getting media source ID:", err);
+    return { success: false, error: err.message };
+  }
+});
+
+// Get the Videos folder path
+ipcMain.handle("recording:getVideosPath", () => {
+  // On Windows, the Videos folder is typically in user's home
+  if (process.platform === "win32") {
+    return app.getPath("videos"); // Electron provides this
+  }
+  // Fallback for other platforms
+  return path.join(os.homedir(), "Videos");
+});
+
+// Track active background tasks
+let activeTaskCount = 0;
+let isQuitting = false;
+
+// Transcode WebM to MP4 using ffmpeg
+ipcMain.handle("recording:transcode", async (_event, { webmPath, mp4Path }) => {
+  if (!ffmpegPath) {
+    throw new Error("ffmpeg not available");
+  }
+
+  activeTaskCount++;
+  console.log(`Starting transcode. Active tasks: ${activeTaskCount}`);
+
+  return new Promise((resolve, reject) => {
+    // Use ffmpeg to convert WebM to MP4 with proper seeking support
+    // -fflags +genpts+igndts helps with files that have broken timestamps
+    // -movflags +faststart moves the moov atom to the start for better seeking
+    // -vsync vfr preserves variable frame rate timing to keep audio/video in sync
+    const args = [
+      "-y", // Overwrite output
+      "-fflags", "+genpts+igndts", // Generate timestamps, ignore DTS
+      "-analyzeduration", "100M", // Analyze more of the file
+      "-probesize", "100M", // Probe more data
+      "-i", webmPath,
+      "-c:v", "libx264",
+      "-preset", "fast",
+      "-b:v", "12000k", // Video bitrate: 12 Mbps
+      "-vsync", "vfr", // Variable frame rate - preserves original timing
+      "-af", "volume=10", // Boost audio volume by 10x
+      "-c:a", "aac",
+      "-b:a", "128k",
+      "-shortest", // Stop when shortest stream (video) ends
+      "-movflags", "+faststart",
+      "-pix_fmt", "yuv420p",
+      mp4Path
+    ];
+    console.log("Starting ffmpeg transcode...");
+    console.log("Input:", webmPath);
+    console.log("Output:", mp4Path);
+
+    const ffmpeg = spawn(ffmpegPath, args);
+    let stderr = "";
+
+    ffmpeg.stderr.on("data", (data) => {
+      stderr += data.toString();
+    });
+
+    const onComplete = () => {
+      activeTaskCount--;
+      console.log(`Transcode finished. Active tasks: ${activeTaskCount}`);
+      if (activeTaskCount === 0 && isQuitting) {
+        console.log("All tasks complete, quitting app.");
+        app.quit();
+      }
+    };
+
+    ffmpeg.on("close", (code) => {
+      onComplete();
+      if (code === 0) {
+        console.log("FFmpeg transcode completed successfully");
+        // Clean up the temporary WebM file
+        try {
+          fs.unlinkSync(webmPath);
+          console.log("Deleted temp WebM file");
+        } catch (e) {
+          console.warn("Could not delete temp WebM:", e);
+        }
+        resolve({ success: true, path: mp4Path });
+      } else {
+        console.error("FFmpeg failed with code:", code);
+        console.error("FFmpeg stderr:", stderr);
+        // Try to clean up the failed MP4 file
+        try {
+          if (fs.existsSync(mp4Path)) {
+            fs.unlinkSync(mp4Path);
+            console.log("Deleted incomplete MP4 file");
+          }
+        } catch (e) {
+          console.warn("Could not delete incomplete MP4:", e);
+        }
+        reject(new Error(`ffmpeg exited with code ${code}: ${stderr.slice(-500)}`));
+      }
+    });
+
+    ffmpeg.on("error", (err) => {
+      onComplete();
+      console.error("FFmpeg spawn error:", err);
+      reject(new Error(`ffmpeg error: ${err.message}`));
+    });
+  });
+});
+
+// Get ffmpeg path (for debugging)
+ipcMain.handle("recording:getFfmpegPath", () => {
+  return ffmpegPath || null;
+});
 
 
 let serverHandle = null;
@@ -366,5 +508,11 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", () => {
   if (serverHandle?.server) serverHandle.server.close();
-  if (process.platform !== "darwin") app.quit();
+
+  if (activeTaskCount > 0) {
+    console.log("Keeping app alive for background tasks...");
+    isQuitting = true; // Will quit when tasks finish
+  } else {
+    if (process.platform !== "darwin") app.quit();
+  }
 });
