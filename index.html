@@ -930,7 +930,7 @@
       background: #0f0f0f;
       border-bottom: 1px solid #222;
       margin: -22px -24px 0 -24px;
-      padding: 0 12px 0 24px;
+      padding: 0 12px 0 9px;
       border-radius: 18px 18px 0 0;
       align-items: center;
     }
@@ -967,7 +967,7 @@
       color: #888;
       font-size: 14px;
       font-weight: 500;
-      padding: 14px 16px 12px 16px;
+      padding: 14px 11px 12px 11px;
       cursor: pointer;
       position: relative;
       transition: color 0.15s;
@@ -985,8 +985,8 @@
       content: '';
       position: absolute;
       bottom: 0;
-      left: 16px;
-      right: 16px;
+      left: 11px;
+      right: 11px;
       height: 2px;
       background: #fff;
       border-radius: 1px;
@@ -1359,6 +1359,140 @@
         transform: scale(0.85);
       }
     }
+
+    /* Comment Sidebar */
+    #commentSidebar {
+      display: none;
+      width: 320px;
+      background: var(--panel);
+      flex-direction: column;
+      height: calc(100% - 5px);
+      flex: 0 0 auto;
+      z-index: 50;
+      border-top-left-radius: 12px;
+      border-bottom-left-radius: 12px;
+      overflow: hidden;
+      /* Ensure it stays manageable */
+    }
+
+    #commentSidebar.open {
+      display: flex;
+    }
+
+    .commentList {
+      flex: 1;
+      overflow-y: overlay;
+      overflow-x: hidden;
+      padding: 10px 0 10px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    /* ... scrollbar styles ... */
+
+    .commentItem {
+      width: 300px;
+      flex-shrink: 0;
+      background: #181818;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid #333;
+      font-size: 13px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .commentList::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    .commentList::-webkit-scrollbar-track {
+      background: transparent;
+      margin: 4px;
+    }
+
+    .commentList::-webkit-scrollbar-thumb {
+      background: #333;
+      border-radius: 10px;
+    }
+
+    .commentList::-webkit-scrollbar-button {
+      display: none;
+    }
+
+
+
+    .commentHeader {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 2px;
+    }
+
+    .commentTimestamp {
+      color: #3498db;
+      font-weight: 600;
+      font-family: monospace;
+      cursor: pointer;
+      font-size: 12px;
+      background: rgba(52, 152, 219, 0.1);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    .commentTimestamp:hover {
+      background: rgba(52, 152, 219, 0.2);
+    }
+
+    .commentText {
+      color: #eee;
+      word-break: break-word;
+      line-height: 1.4;
+      white-space: pre-wrap;
+    }
+
+    .commentInputArea {
+      padding: 10px;
+      padding-bottom: 6px;
+      background: #141414;
+    }
+
+    #commentInput {
+      width: 100%;
+      height: 75px;
+      background: #0a0a0a;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: white;
+      resize: none;
+      font-family: inherit;
+    }
+
+    #commentInput:focus,
+    .commentEditInput:focus {
+      background-image: linear-gradient(#0a0a0a, #0a0a0a), var(--active-gradient) !important;
+    }
+
+    #commentInput::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    #commentInput::-webkit-scrollbar-track {
+      background: transparent;
+      margin: 4px;
+    }
+
+    #commentInput::-webkit-scrollbar-thumb {
+      background: #333;
+      border-radius: 10px;
+    }
+
+    #commentInput::-webkit-scrollbar-button {
+      display: none;
+    }
   </style>
 </head>
 
@@ -1375,7 +1509,7 @@
   <div class="app">
     <div class="topbar">
       <!-- required order -->
-      <button id="loadBtn">Load</button>
+      <button id="loadBtn">Review</button>
 
 
 
@@ -1422,7 +1556,45 @@
       <!-- Populated via JS -->
     </div>
 
-    <div class="grid" id="grid"></div>
+    <!-- Main Content Area (Grid + Sidebar) -->
+    <div id="mainArea" style="flex: 1; display: flex; overflow: hidden; min-height: 0; position: relative;">
+      <div class="grid" id="grid"></div>
+
+      <div id="commentSidebar">
+        <div
+          style="background: #1a1a1a; padding: 0 10px; height: 32px; font-size: 14px; font-weight: 500; border-bottom: 1px solid var(--border); color: #ddd; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+          <span>Comments</span>
+          <div style="display: flex; align-items: center; gap: 3px;">
+            <button id="downloadCommentsBtn"
+              style="display: flex; align-items: center; justify-content: center; background: transparent; border: none; color: #888; cursor: pointer; padding: 4px;"
+              title="Download Comments">
+              <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+            </button>
+            <button id="closeCommentsBtn"
+              style="display: flex; align-items: center; justify-content: center; background: transparent; border: none; color: #888; cursor: pointer; padding: 4px;"
+              title="Close (C)">
+              <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"
+                stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="commentList" id="commentList">
+          <!-- Comments go here -->
+          <div style="text-align: center; color: #666; margin-top: 20px; font-style: italic;">No comments yet</div>
+        </div>
+        <div class="commentInputArea">
+          <textarea id="commentInput" placeholder="Type comment..." autocomplete="off"></textarea>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div id="zenHoverZone" class="zenHoverZone"></div>
@@ -1458,13 +1630,14 @@
 
   <!-- Settings modal with tabs -->
   <div id="settingsModal" class="modalBackdrop">
-    <div class="modalPanel" tabindex="-1" style="width: fit-content; max-width: 90vw; min-width: 400px; height: 471px;">
+    <div class="modalPanel" tabindex="-1" style="width: 450px; height: 577px;">
       <!-- Tab bar with integrated close button -->
       <div class="settingsTabs">
         <button class="settingsTab active" data-tab="general">General</button>
         <button class="settingsTab" data-tab="layout">Layout</button>
         <button class="settingsTab" data-tab="keybinds">Keybinds</button>
         <button class="settingsTab" data-tab="draw">Draw</button>
+        <button class="settingsTab" data-tab="recording">Recording</button>
         <button id="keybindsReset" class="settingsTabClose" aria-label="Reset to defaults"
           title="Reset keybinds to defaults" style="margin-left: auto;">
           <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"
@@ -1656,7 +1829,7 @@
           /* Keybinds specific styles */
           /* Explicitly override padding for Keybinds to ensure 52px height */
           #settingsTabKeybinds .settingsRow {
-            padding: 11px 0 13px 0;
+            padding: 12px 0 12px 0;
           }
 
           .kbKey {
@@ -1835,6 +2008,20 @@
             </button>
           </div>
         </div>
+
+        <div class="settingsRow kbRow" data-action="comment">
+          <span class="settingsLabel">Toggle Comments</span>
+          <div class="settingsCycle">
+            <div class="kbKey" id="kb_key_comment">C</div>
+            <button class="kbEdit" data-action="comment" title="Edit">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 20h9"></path>
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- Draw tab content -->
@@ -1873,6 +2060,32 @@
             <button class="cycleBtn" id="defaultToolLeft">◀</button>
             <span class="cycleValue" id="defaultToolValue">Always Pencil</span>
             <button class="cycleBtn" id="defaultToolRight">▶</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recording tab content -->
+      <div id="settingsTabRecording" class="settingsTabContent">
+        <div class="settingsRow kbRow" data-action="rec_path">
+          <span class="settingsLabel">Save Location</span>
+          <div class="settingsCycle">
+            <div class="kbKey" id="recPathValue"
+              style="min-width: 60px; padding: 0 10px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+              ...</div>
+            <button class="kbEdit" id="recPathChangeBtn" title="Change Folder">
+              <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="settingsRow">
+          <span class="settingsLabel">Resolution</span>
+          <div class="settingsCycle">
+            <button class="cycleBtn" id="recResLeft">◀</button>
+            <span class="cycleValue" id="recResValue">1080p</span>
+            <button class="cycleBtn" id="recResRight">▶</button>
           </div>
         </div>
       </div>

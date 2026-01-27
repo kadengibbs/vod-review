@@ -11,7 +11,9 @@ let ignoreEventsUntil = 0;
 
 let driftTimer = null;
 let uiTimer = null;
+let verifySeekTimer = null;
 let isSeeking = false;
+let isVerifiedSeeking = false;
 let isZenSeeking = false;
 let lastZenHoverV = null; // stores the exact range value we computed from mouse position
 
@@ -57,6 +59,7 @@ let mediaRecorder = null;
 let recordedChunks = [];
 let recordingStream = null;
 let recordingStartTime = 0;
+let recordingResolution = localStorage.getItem("vod_rec_res") || "1080p";
 
 // Layout options: defines row structure for each video count and option
 // Each entry is an array of { count, centered } where count = videos in that row
@@ -84,6 +87,14 @@ const LAYOUT_CONFIGS = {
 let currentLayoutOption = 'A';
 let currentFilledVideoCount = 0;
 let cachedDriftBeforeTwitch = null;
+
+const el = id => document.getElementById(id);
+
+function on(id, event, handler) {
+  const node = el(id);
+  if (!node) return;
+  node.addEventListener(event, handler);
+}
 
 function isTypingTarget(node) {
   if (!node) return false;
@@ -138,7 +149,7 @@ function isNativePlayerKey(e) {
     k === "j" || k === "k" || k === "l" ||
     k === "," || k === "." ||
     k === "m" || k === "f" ||
-    k === "c" || k === "t" || k === "i"
+    k === "t" || k === "i"
   ) return true;
 
   // Some browsers report space via code
@@ -176,15 +187,16 @@ document.addEventListener("focusout", () => {
 
 // ----- Editable keybinds -----
 const DEFAULT_BINDS = {
-  rew30: "g",
-  rew5: "h",
+  rew30: "shift+arrowleft",
+  rew5: "arrowleft",
   playpause: " ",
-  fwd5: "k",
-  fwd30: "l",
+  fwd5: "arrowright",
+  fwd30: "shift+arrowright",
   mute: "m",
   focus: "f",
   draw: "d",
-  record: "c"
+  record: "r",
+  comment: "c"
 };
 
 let keybinds = loadKeybinds();
@@ -233,14 +245,33 @@ function saveKeybinds() {
   ipcRenderer.send("app:updateKeybinds", keybinds);
 }
 
+
+function formatCombo(combo) {
+  if (!combo) return "UNBOUND";
+  if (combo === " ") return "SPACE";
+
+  return combo.split("+").map(part => {
+    const p = part.toLowerCase();
+    switch (p) {
+      case "arrowup": return "↑";
+      case "arrowdown": return "↓";
+      case "arrowleft": return "←";
+      case "arrowright": return "→";
+      case "shift": return "Shift";
+      case "control": return "Ctrl";
+      case "alt": return "Alt";
+      case "meta": return "Win";
+      case " ": return "SPACE";
+      default: return p.toUpperCase();
+    }
+  }).join(" + ");
+}
+
 function renderKeybindsUi() {
   const set = (id, val) => {
     const n = el(id);
     if (n) {
-      let v = String(val || "").toUpperCase();
-      if (v === " " || v === "") v = "SPACE"; // also handle empty if needed, but per request " " -> "SPACE"
-      if (v.trim() === "" && v.length > 0) v = "SPACE"; // catch-all for whitespace-only if not empty
-      n.textContent = v;
+      n.textContent = formatCombo(val);
     }
   };
   set("kb_key_rew30", keybinds.rew30);
@@ -252,6 +283,7 @@ function renderKeybindsUi() {
   set("kb_key_focus", keybinds.focus);
   set("kb_key_draw", keybinds.draw);
   set("kb_key_record", keybinds.record);
+  set("kb_key_comment", keybinds.comment);
 
   updateKeybindLegend();
 }
@@ -270,13 +302,12 @@ function updateKeybindLegend() {
     { key: keybinds.mute, label: "Mute", action: "mute" },
     { key: keybinds.focus, label: "Focus", action: "focus" },
     { key: keybinds.draw, label: "Draw", action: "draw" },
-    { key: keybinds.record, label: "Record", action: "record" }
+    { key: keybinds.record, label: "Record", action: "record" },
+    { key: keybinds.comment, label: "Comment", action: "comment" }
   ];
 
   const legendHtml = items.map(item => {
-    let k = String(item.key || "").toUpperCase();
-    if (k === " ") k = "SPACE";
-    if (k === "") k = "UNBOUND";
+    const k = formatCombo(item.key);
     // Add clickable class for feedback
     return `<div class="kblItem clickable" data-action="${item.action}"><span class="kblKey">${k}</span> ${item.label}</div>`;
   }).join("");
@@ -356,7 +387,419 @@ function triggerAction(action) {
     case "focus": if (!drawMode) toggleFocusSelectMode(); break;
     case "draw": toggleDrawMode(); break;
     case "record": toggleRecording(); break;
+    case "comment": toggleCommentMode(); break;
   }
+}
+
+// ---- Comment Mode Logic ----
+
+function toggleCommentMode() {
+  const sidebar = el("commentSidebar");
+  if (!sidebar) return;
+
+  const isOpen = sidebar.classList.contains("open");
+  if (isOpen) {
+    // Close
+    sidebar.classList.remove("open");
+    const input = el("commentInput");
+    if (input) input.blur();
+  } else {
+    // Open
+    sidebar.classList.add("open");
+
+    // Auto-pause if playing
+    if (anyPlaying()) {
+      pauseAll();
+    }
+
+    // Focus input
+    const input = el("commentInput");
+    if (input) setTimeout(() => input.focus(), 50);
+  }
+}
+
+// Bind comment handlers
+on("closeCommentsBtn", "click", () => {
+  const sidebar = el("commentSidebar");
+  if (sidebar && sidebar.classList.contains("open")) {
+    toggleCommentMode();
+  }
+});
+
+on("downloadCommentsBtn", "click", () => {
+  const list = el("commentList");
+  if (!list) return;
+
+  const items = Array.from(list.querySelectorAll(".commentItem"));
+  if (items.length === 0) return;
+
+  const fileContent = items.map(item => {
+    const timeStr = item.querySelector(".commentTimestamp")?.textContent || "00:00";
+    const text = item.querySelector(".commentText")?.textContent || "";
+    return `${timeStr}\n${text}`;
+  }).join("\n\n");
+
+  const now = new Date();
+  const timestamp = now.toISOString()
+    .replace(/[:.]/g, "-")
+    .replace("T", "_")
+    .slice(0, 19);
+  const filename = `VODReview_Comments_${timestamp}.txt`;
+
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const os = require('os');
+    const downloadDir = path.join(os.homedir(), 'Downloads');
+    if (!fs.existsSync(downloadDir)) fs.mkdirSync(downloadDir);
+
+    const filePath = path.join(downloadDir, filename);
+    fs.writeFileSync(filePath, fileContent);
+    // Notify user
+    if (typeof setStatus === 'function') {
+      setStatus(`Comments saved to Downloads/${filename}`, false, 3000);
+    }
+
+    // Visual feedback on button
+    const btn = el("downloadCommentsBtn");
+    if (btn) {
+      const originalHTML = btn.innerHTML;
+      const originalColor = btn.style.color;
+      btn.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
+      btn.style.color = "#2ecc71"; // Green
+      setTimeout(() => {
+        btn.innerHTML = originalHTML;
+        btn.style.color = originalColor;
+      }, 2000);
+    }
+  } catch (err) {
+    console.warn("Direct file write failed, falling back to browser download:", err);
+    // Fallback
+    const blob = new Blob([fileContent], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+});
+
+const commentInput = el("commentInput");
+if (commentInput) {
+  commentInput.addEventListener("keydown", (e) => {
+    e.stopPropagation(); // Stop bubbling so space doesn't toggle play
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault(); // Prevent newline
+      const text = commentInput.value.trim();
+      if (!text) return;
+
+      const time = getMedianGlobalTime();
+      addComment(time, text);
+      commentInput.value = "";
+
+      const list = el("commentList");
+      if (list) list.scrollTop = list.scrollHeight;
+    }
+  });
+}
+
+function addComment(time, text) {
+  const list = el("commentList");
+  if (!list) return;
+
+  // Clear initial placeholder
+  if (list.querySelector("div")?.innerText === "No comments yet") {
+    list.innerHTML = "";
+  }
+
+  const div = document.createElement("div");
+  div.className = "commentItem";
+  const timeStr = formatTime(time);
+
+  // Icons
+  // Pencil (Stroke based - matching Draw Tool)
+  const editIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>`;
+  // Trash (Fill based - matching Clear Tool)
+  const trashIcon = `<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>`;
+
+  div.dataset.time = time;
+  div.innerHTML = `
+    <div class="commentHeader" style="justify-content: space-between;">
+      <div class="commentTimestamp" title="Seek to this time">${timeStr}</div>
+      <div class="commentActions" style="display: flex; gap: 6px; opacity: 0.7; transition: opacity 0.2s;">
+        <button class="commentBtn editBtn" title="Edit" style="background:none; border:none; cursor:pointer; color:#ccc; padding:2px; display:flex; align-items:center;">${editIcon}</button>
+        <button class="commentBtn deleteBtn" title="Delete" style="background:none; border:none; cursor:pointer; color:#ccc; padding:2px; display:flex; align-items:center;">${trashIcon}</button>
+      </div>
+    </div>
+    <div class="commentText" style="word-wrap: break-word;"></div>
+  `;
+
+  // Set text safely
+  const textDiv = div.querySelector(".commentText");
+  textDiv.textContent = text;
+
+  // Hover effect for actions visibility
+  const actions = div.querySelector(".commentActions");
+  div.addEventListener("mouseenter", () => actions.style.opacity = "1");
+  div.addEventListener("mouseleave", () => actions.style.opacity = "0.7");
+
+  // Bind Seek
+  div.querySelector(".commentTimestamp").addEventListener("click", () => {
+    seekAll(parseFloat(div.dataset.time)); // Use dataset time which is updated
+  });
+
+  // Bind Delete
+  div.querySelector(".deleteBtn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    div.remove();
+    if (list.children.length === 0) {
+      list.innerHTML = `<div style="text-align: center; color: #666; padding: 20px;">No comments yet</div>`;
+    }
+  });
+
+  // Bind Edit
+  div.querySelector(".editBtn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (div.classList.contains("editing")) return;
+    div.classList.add("editing");
+
+    const currentText = textDiv.textContent;
+    const timestampDiv = div.querySelector(".commentTimestamp");
+    const currentTimeStr = timestampDiv.textContent;
+
+    // Replace Text with Textarea
+    const input = document.createElement("textarea");
+    input.className = "commentEditInput";
+    input.value = currentText;
+    input.style.cssText = "width: 100%; min-height: 60px; background: #0a0a0a; color: #eee; border: 1px solid #444; padding: 4px 6px; border-radius: 4px; font-size: inherit; font-family: inherit; margin-top: 2px; resize: none; overflow: hidden; white-space: pre-wrap;";
+
+    // Replace Timestamp with Input
+    const timeInput = document.createElement("input");
+    timeInput.className = "commentEditTime";
+    timeInput.value = currentTimeStr;
+    timeInput.style.cssText = "background: #0a0a0a; color: #3498db; border: 1px solid #444; border-radius: 4px; padding: 2px 4px; font-size: 12px; font-family: monospace; width: 80px;";
+
+    timestampDiv.replaceWith(timeInput);
+
+    const adjustHeight = () => {
+      input.style.height = "auto";
+      input.style.height = (input.scrollHeight + 2) + "px";
+    };
+    input.addEventListener("input", adjustHeight);
+
+    // Parse helper (simple MM:SS or HH:MM:SS) to Seconds
+    const parseToSeconds = (str) => {
+      const parts = str.split(":").map(Number);
+      if (parts.some(isNaN)) return parseFloat(div.dataset.time); // fallback
+      if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+      if (parts.length === 2) return parts[0] * 60 + parts[1];
+      return parts[0] || 0;
+    };
+
+    const finishEdit = (save) => {
+      // Validation on Save
+      if (save) {
+        const tVal = timeInput.value.trim();
+        // Regex: M+:SS or H+:MM:SS. 
+        // Allow 1 or more digits for first part, 2 digits for others.
+        // Expanded slightly to be robust: ^\d+:\d{2}(:\d{2})?$
+        const validTime = /^\d+:\d{2}(:\d{2})?$/.test(tVal);
+
+        if (!validTime) {
+          timeInput.style.borderColor = "#e74c3c"; // Red
+          return; // Block save
+        }
+        timeInput.style.borderColor = "#444"; // Reset
+
+        // Text
+        const val = input.value.trim();
+        if (val) textDiv.textContent = val;
+        else textDiv.textContent = currentText;
+
+        // Time
+        const newTimeSec = parseToSeconds(tVal);
+        const normalizedTimeStr = formatTime(newTimeSec);
+
+        // Update Timestamp UI
+        const newTsDiv = document.createElement("div");
+        newTsDiv.className = "commentTimestamp";
+        newTsDiv.title = "Seek to this time";
+        newTsDiv.textContent = normalizedTimeStr;
+        // Bind new seek
+        newTsDiv.addEventListener("click", () => seekAll(newTimeSec));
+        timeInput.replaceWith(newTsDiv);
+
+        // Update Sort Order if changed
+        if (parseFloat(div.dataset.time) !== newTimeSec) {
+          div.dataset.time = newTimeSec;
+          // Re-insert sorted
+          div.remove();
+          insertSorted(div);
+        }
+      } else {
+        // Cancel - restore everything
+        textDiv.textContent = currentText;
+        const oldTsDiv = document.createElement("div");
+        oldTsDiv.className = "commentTimestamp";
+        oldTsDiv.title = "Seek to this time";
+        oldTsDiv.textContent = currentTimeStr;
+        oldTsDiv.addEventListener("click", () => seekAll(parseFloat(div.dataset.time)));
+        timeInput.replaceWith(oldTsDiv);
+      }
+      div.classList.remove("editing");
+    };
+
+    const handleKey = (ev) => {
+      ev.stopPropagation();
+      if (ev.key === "Enter" && !ev.shiftKey) {
+        ev.preventDefault();
+        finishEdit(true);
+        return;
+      }
+      if (ev.key === "Escape") {
+        finishEdit(false);
+        return;
+      }
+
+      // Colon Protection (Time Input)
+      if (ev.target === timeInput) {
+        const val = timeInput.value;
+        const s = timeInput.selectionStart;
+        const e = timeInput.selectionEnd;
+
+        if (ev.key === "Backspace") {
+          if (s !== e) {
+            if (val.substring(s, e).includes(":")) ev.preventDefault();
+          } else if (s > 0 && val[s - 1] === ":") {
+            ev.preventDefault();
+            timeInput.setSelectionRange(s - 1, s - 1);
+          }
+        } else if (ev.key === "Delete") {
+          if (s !== e) {
+            if (val.substring(s, e).includes(":")) ev.preventDefault();
+          } else if (s < val.length && val[s] === ":") {
+            ev.preventDefault();
+            timeInput.setSelectionRange(s + 1, s + 1);
+          }
+        } else if (ev.key.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
+          if (s !== e && val.substring(s, e).includes(":")) ev.preventDefault();
+        }
+
+        // Reset red border on typing
+        if (timeInput.style.borderColor === 'rgb(231, 76, 60)' || timeInput.style.borderColor === '#e74c3c') {
+          timeInput.style.borderColor = "#444";
+        }
+      }
+    };
+
+    input.addEventListener("keydown", handleKey);
+    input.addEventListener("blur", (e) => {
+      // Only save if we are not moving focus to the other input
+      if (e.relatedTarget !== timeInput) finishEdit(true);
+    });
+
+    timeInput.addEventListener("keydown", handleKey);
+    // Prevent blur on timeInput from triggering save immediately if moving to text input? 
+    // Actually, blurring one usually saves in the current logic. 
+    // Let's rely on the input blur logic, but if I click between them it might be annoying.
+    // Better: Only save if clicking OUTSIDE both. 
+    // Simplified: If I move focus between them, `blur` fires. 
+    // Fix: Check relatedTarget.
+    timeInput.addEventListener("blur", (e) => {
+      if (e.relatedTarget !== input) finishEdit(true);
+    });
+
+    textDiv.textContent = "";
+    textDiv.appendChild(input);
+    adjustHeight();
+    input.focus();
+  });
+
+  // Helper to insert in order
+  const insertSorted = (node) => {
+    const children = Array.from(list.children);
+    const t = parseFloat(node.dataset.time);
+    let inserted = false;
+    for (const child of children) {
+      if (!child.classList.contains("commentItem")) continue;
+      if (parseFloat(child.dataset.time) > t) {
+        list.insertBefore(node, child);
+        inserted = true;
+        break;
+      }
+    }
+    if (!inserted) list.appendChild(node);
+  };
+
+  insertSorted(div); // Initial Insert
+}
+
+
+
+function seekAll(t) {
+  // Use verified seek to hold the UI until players actually arrive at the target
+  seekAllVerified(t);
+}
+
+function seekAllVerified(targetGlobal, tolerance = 1.5, maxWait = 5000) {
+  isVerifiedSeeking = true;
+
+  // 1. Initiate the seek + initial lockout
+  // We use a safe initial lockout (e.g. 500ms) to give them a chance to react
+  seekAllToGlobal(targetGlobal, 500);
+
+  // 2. Clear any existing verifier
+  if (verifySeekTimer) {
+    clearInterval(verifySeekTimer);
+    verifySeekTimer = null;
+  }
+
+  // 3. Start verification loop
+  const startTime = nowMs();
+
+  // Extend lockout intentionally
+  ignoreEventsUntil = startTime + maxWait;
+  syncing = true;
+
+  let consecutiveSuccess = 0;
+
+  verifySeekTimer = setInterval(() => {
+    // Check if we timed out
+    if (nowMs() - startTime > maxWait) {
+      console.log("Verified seek timed out - releasing lock");
+      clearInterval(verifySeekTimer);
+      verifySeekTimer = null;
+      syncing = false;
+      isVerifiedSeeking = false;
+      ignoreEventsUntil = 0; // release immediately
+      return;
+    }
+
+    // Check coverage
+    // We want the median global time to be close to targetGlobal
+    const currentMedian = getMedianGlobalTime();
+    const diff = Math.abs(currentMedian - targetGlobal);
+
+    if (diff < tolerance) {
+      consecutiveSuccess++;
+    } else {
+      consecutiveSuccess = 0;
+    }
+
+    // Require 3 consecutive hits (approx 300ms stable)
+    if (consecutiveSuccess >= 3) {
+      // Verified!
+      clearInterval(verifySeekTimer);
+      verifySeekTimer = null;
+      syncing = false;
+      isVerifiedSeeking = false;
+      ignoreEventsUntil = 0; // Release lock
+    }
+
+  }, 100);
 }
 
 // Custom keybinds forwarded from main process (works even when YouTube iframe has focus)
@@ -394,7 +837,10 @@ async function startRecording() {
     const mediaSourceId = result.id;
     console.log("Capturing window with media source ID:", mediaSourceId);
 
-    // Request media stream for this specific window at 1080p60
+    // Request media stream for this specific window
+    const targetWidth = recordingResolution === "1080p" ? 1920 : 1280;
+    const targetHeight = recordingResolution === "1080p" ? 1080 : 720;
+
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         mandatory: {
@@ -406,10 +852,10 @@ async function startRecording() {
         mandatory: {
           chromeMediaSource: "desktop",
           chromeMediaSourceId: mediaSourceId,
-          minWidth: 1920,
-          maxWidth: 1920,
-          minHeight: 1080,
-          maxHeight: 1080,
+          minWidth: targetWidth,
+          maxWidth: targetWidth,
+          minHeight: targetHeight,
+          maxHeight: targetHeight,
           minFrameRate: 60,
           maxFrameRate: 60
         }
@@ -532,7 +978,8 @@ async function processRecording() {
     // Transcode to MP4 - if closing, trigger and forget, trusting main process to finish
     const transcodePromise = ipcRenderer.invoke("recording:transcode", {
       webmPath: tempWebmPath,
-      mp4Path: mp4Path
+      mp4Path: mp4Path,
+      resolution: recordingResolution
     });
 
     if (pendingClose) {
@@ -580,16 +1027,72 @@ function showRecordingError(msg) {
 }
 
 
+
 let currentAppVersion = null;
 
+// Initialize version label (and enables update checks)
+// initAppVersionUI(); // Assuming this function exists elsewhere or is commented out
 
-const el = id => document.getElementById(id);
+// Layout option button handlers
+on("layoutA", "click", () => {
+  currentLayoutOption = 'A';
+  updateLayoutOptionsUI(currentFilledVideoCount);
+  applyLayout();
+});
+on("layoutB", "click", () => {
+  currentLayoutOption = 'B';
+  updateLayoutOptionsUI(currentFilledVideoCount);
+  applyLayout();
+});
+on("layoutC", "click", () => {
+  currentLayoutOption = 'C';
+  updateLayoutOptionsUI(currentFilledVideoCount);
+  applyLayout();
+});
 
-function on(id, event, handler) {
-  const node = el(id);
-  if (!node) return;
-  node.addEventListener(event, handler);
-}
+on("threshold", "change", () => {
+  checkTwitchConstraints();
+});
+
+// --------------- Feedback Modal ---------------
+on("feedbackBtn", "click", () => {
+  el("feedbackModal").classList.add("open");
+  el("feedbackText").value = "";
+  el("feedbackStatus").textContent = "";
+  el("feedbackSubmit").disabled = true;
+});
+
+on("feedbackClose", "click", () => {
+  el("feedbackModal").classList.remove("open");
+});
+
+// Close on backdrop click
+el("feedbackModal")?.addEventListener("click", (e) => {
+  if (e.target.id === "feedbackModal") {
+    el("feedbackModal").classList.remove("open");
+  }
+});
+
+on("feedbackText", "input", () => {
+  el("feedbackSubmit").disabled = !el("feedbackText").value.trim();
+});
+
+on("feedbackSubmit", "click", async () => {
+  const msg = el("feedbackText").value.trim();
+  if (!msg) return;
+
+  el("feedbackSubmit").disabled = true;
+  el("feedbackStatus").textContent = "Sending…";
+
+  try {
+    await ipcRenderer.invoke("feedback:submit", { message: msg });
+    el("feedbackStatus").textContent = "Sent. Thank you for helping me improve this app!";
+    setTimeout(() => el("feedbackModal").classList.remove("open"), 1500);
+  } catch (err) {
+    el("feedbackStatus").textContent = "Failed to send. Try again.";
+    el("feedbackSubmit").disabled = false;
+  }
+});
 
 // Bind Keybind Legend toggle
 on("keybindLegendLeft", "click", cycleKeybindLegend);
@@ -1765,7 +2268,11 @@ function syncNow() {
 }
 
 function skipAll(deltaSeconds) {
-  const g = getMedianGlobalTime() + (Number(deltaSeconds) || 0);
+  // If we are currently syncing/locked out (e.g. rapid key presses), 
+  // trust our calculated globalCursorTime instead of polling lagging players.
+  // This prevents "jumping back" when chaining commands (e.g. +30s then -5s immediately).
+  let base = (syncing || inLockout()) ? globalCursorTime : getMedianGlobalTime();
+  const g = base + (Number(deltaSeconds) || 0);
   seekAllToGlobal(g, 2000);
 }
 
@@ -1815,7 +2322,8 @@ function seekAllToGlobal(globalT, lockoutMs = 650) {
 function updateUiTime() {
   if (!players.length) return;
 
-  const g = (syncing || inLockout()) ? globalCursorTime : getMedianGlobalTime();
+  // If verified seeking, rely on actual median time (don't fake it with globalCursorTime)
+  const g = ((syncing || inLockout()) && !isVerifiedSeeking) ? globalCursorTime : getMedianGlobalTime();
   const d = getMaxGlobalEnd();
 
   const timeLabel = el("timeLabel");
@@ -2197,14 +2705,14 @@ async function checkTwitchConstraints(force = false) {
     if (hasTwitch) {
       tInput.min = "1.0";
       if (Number.isFinite(val) && val < 1.0) {
-        tInput.value = "1.0";
-        setStatus("Minimum drift required with Twitch is 1.0 sec", true, 3000);
+        tInput.value = "1.00";
+        setStatus("Minimum drift required with Twitch is 1.00 sec", true, 3000);
       }
     } else {
       tInput.min = "0.1";
       if (Number.isFinite(val) && val < 0.1) {
-        tInput.value = "0.1";
-        setStatus("Minimum drift tolerance is 0.1 sec", true, 3000);
+        tInput.value = "0.10";
+        setStatus("Minimum drift tolerance is 0.10 sec", true, 3000);
       }
     }
     return;
@@ -2222,7 +2730,7 @@ async function checkTwitchConstraints(force = false) {
     tInput.min = "0.1";
   }
 
-  tInput.value = targetVal;
+  tInput.value = (parseFloat(targetVal) || 0).toFixed(2);
   lastTwitchState = hasTwitch;
 }
 
@@ -3620,6 +4128,8 @@ const openSettings = () => {
   updateFocusSizeUI();
   updatePauseOnDrawUI();
   updateDriftCorrectionUI();
+  updateRecordingResolutionUI();
+  updateRecordingPathUI();
   updateResetTooltip("general");
   // Force reset tabs to "General"
   const tabs = document.querySelectorAll(".settingsTab");
@@ -3865,6 +4375,9 @@ if (resetBtn) {
         case "draw":
           await resetDrawSettings();
           break;
+        case "recording":
+          resetRecordingSettings();
+          break;
       }
 
       // Visual feedback that it finished
@@ -3977,6 +4490,59 @@ async function cycleDefaultDrawColor(direction) {
 
 on("defaultColorLeft", "click", () => cycleDefaultDrawColor(-1));
 on("defaultColorRight", "click", () => cycleDefaultDrawColor(1));
+
+// Recording Settings UI
+function updateRecordingResolutionUI() {
+  const elVal = el("recResValue");
+  if (elVal) elVal.textContent = recordingResolution;
+}
+
+function cycleRecordingResolution() {
+  recordingResolution = recordingResolution === "1080p" ? "720p" : "1080p";
+  localStorage.setItem("vod_rec_res", recordingResolution);
+  updateRecordingResolutionUI();
+}
+
+function resetRecordingSettings() {
+  recordingResolution = "1080p";
+  localStorage.setItem("vod_rec_res", recordingResolution);
+  updateRecordingResolutionUI();
+}
+
+on("recResLeft", "click", cycleRecordingResolution);
+on("recResRight", "click", cycleRecordingResolution);
+
+
+async function updateRecordingPathUI() {
+  const pathVal = el("recPathValue");
+  if (!pathVal) return;
+
+  const currentPath = await ipcRenderer.invoke("recording:getVideosPath");
+
+  // Extract last folder name (support both / and \)
+  const separators = /[\\/]/;
+  const parts = currentPath.split(separators).filter(check => check !== "");
+  const folderName = parts[parts.length - 1] || currentPath;
+
+  pathVal.textContent = folderName;
+  pathVal.title = currentPath;
+}
+
+async function changeRecordingPath() {
+  const newPath = await ipcRenderer.invoke("dialog:openDirectory");
+  if (newPath) {
+    await ipcRenderer.invoke("recording:setVideosPath", newPath);
+    updateRecordingPathUI();
+  }
+}
+
+on("recPathChangeBtn", "click", changeRecordingPath);
+
+function resetRecordingSettings() {
+  recordingResolution = "1080p";
+  localStorage.setItem("vod_rec_res", recordingResolution);
+  updateRecordingResolutionUI();
+}
 
 
 // Circle Draw Mode Logic
@@ -4362,6 +4928,7 @@ document.querySelectorAll(".kbEdit").forEach(btn => {
 });
 
 // Capture the next key press when editing
+// Capture the next key press when editing
 window.addEventListener("keydown", (e) => {
   if (!editingAction) return;
 
@@ -4372,13 +4939,29 @@ window.addEventListener("keydown", (e) => {
     return;
   }
 
-  // Ignore modifier combos
-  if (e.ctrlKey || e.altKey || e.metaKey) return;
+  const k = String(e.key || "").toLowerCase();
 
-  const pressed = String(e.key || "").toLowerCase();
+  // If the pressed key is a modifier itself, just consume it and wait for the combo
+  if (["control", "alt", "shift", "meta"].includes(k)) {
+    e.preventDefault();
+    return;
+  }
 
-  // Ignore pure modifiers
-  if (pressed === "shift" || pressed === "control" || pressed === "alt" || pressed === "meta") return;
+  // Construct key combo
+  const parts = [];
+  if (e.ctrlKey) parts.push("control");
+  if (e.altKey) parts.push("alt");
+  if (e.shiftKey) parts.push("shift");
+  if (e.metaKey) parts.push("meta");
+
+  // Prevent multiple modifiers (as requested: "adder keys should not be able to be added to another adder key")
+  if (parts.length > 1) {
+    e.preventDefault();
+    return;
+  }
+
+  parts.push(k);
+  const pressed = parts.join("+");
 
   // Don’t allow binding to a key already used
   const alreadyUsedBy = Object.entries(keybinds).find(([act, k]) => act !== editingAction && k === pressed);
@@ -4447,6 +5030,13 @@ on("zSettings", "click", () => {
   if (drawMode) {
     toggleDrawMode();
   }
+
+  // Close comments if open
+  const cSidebar = el("commentSidebar");
+  if (cSidebar && cSidebar.classList.contains("open")) {
+    toggleCommentMode();
+  }
+
   toggleZenMode();
 });
 
@@ -4571,29 +5161,21 @@ updateKeybindLegend();
 
 // Initialize version label (and enables update checks)
 initAppVersionUI();
+ensureVideoRow(0);
 
 // Layout option button handlers
-on("layoutA", "click", async () => {
+on("layoutA", "click", () => {
   currentLayoutOption = 'A';
-  if (currentFilledVideoCount > 1) {
-    await ipcRenderer.invoke("layout:setPreference", { count: currentFilledVideoCount, option: 'A' });
-  }
   updateLayoutOptionsUI(currentFilledVideoCount);
   applyLayout();
 });
-on("layoutB", "click", async () => {
+on("layoutB", "click", () => {
   currentLayoutOption = 'B';
-  if (currentFilledVideoCount > 1) {
-    await ipcRenderer.invoke("layout:setPreference", { count: currentFilledVideoCount, option: 'B' });
-  }
   updateLayoutOptionsUI(currentFilledVideoCount);
   applyLayout();
 });
-on("layoutC", "click", async () => {
+on("layoutC", "click", () => {
   currentLayoutOption = 'C';
-  if (currentFilledVideoCount > 1) {
-    await ipcRenderer.invoke("layout:setPreference", { count: currentFilledVideoCount, option: 'C' });
-  }
   updateLayoutOptionsUI(currentFilledVideoCount);
   applyLayout();
 });

@@ -118,7 +118,13 @@ ipcMain.handle("recording:getOwnMediaSourceId", async (_event) => {
 });
 
 // Get the Videos folder path
+// Get the Videos folder path
 ipcMain.handle("recording:getVideosPath", () => {
+  const settings = loadSettings();
+  if (settings.recordingPath) {
+    return settings.recordingPath;
+  }
+
   // On Windows, the Videos folder is typically in user's home
   if (process.platform === "win32") {
     return app.getPath("videos"); // Electron provides this
@@ -127,18 +133,46 @@ ipcMain.handle("recording:getVideosPath", () => {
   return path.join(os.homedir(), "Videos");
 });
 
+ipcMain.handle("recording:setVideosPath", (_evt, newPath) => {
+  const settings = loadSettings();
+  settings.recordingPath = newPath;
+  saveSettings(settings);
+  return newPath;
+});
+
+// Open Directory Dialog
+ipcMain.handle("dialog:openDirectory", async () => {
+  const { dialog, BrowserWindow } = require("electron");
+  const win = BrowserWindow.getFocusedWindow();
+  const result = await dialog.showOpenDialog(win, {
+    properties: ["openDirectory"]
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+  return result.filePaths[0];
+});
+
 // Track active background tasks
 let activeTaskCount = 0;
 let isQuitting = false;
 
 // Transcode WebM to MP4 using ffmpeg
-ipcMain.handle("recording:transcode", async (_event, { webmPath, mp4Path }) => {
+ipcMain.handle("recording:transcode", async (_event, { webmPath, mp4Path, resolution }) => {
   if (!ffmpegPath) {
     throw new Error("ffmpeg not available");
   }
 
   activeTaskCount++;
   console.log(`Starting transcode. Active tasks: ${activeTaskCount}`);
+
+  // Determine bitrate based on resolution
+  // Default to 12000k (1080p) if not specified or unknown
+  let bitrate = "12000k";
+  if (resolution === "720p") {
+    bitrate = "6000k"; // 6 Mbps for 720p
+  }
 
   return new Promise((resolve, reject) => {
     // Use ffmpeg to convert WebM to MP4 with proper seeking support
@@ -153,7 +187,7 @@ ipcMain.handle("recording:transcode", async (_event, { webmPath, mp4Path }) => {
       "-i", webmPath,
       "-c:v", "libx264",
       "-preset", "fast",
-      "-b:v", "12000k", // Video bitrate: 12 Mbps
+      "-b:v", bitrate, // Dynamic bitrate
       "-vsync", "vfr", // Variable frame rate - preserves original timing
       "-af", "volume=10", // Boost audio volume by 10x
       "-c:a", "aac",
@@ -166,6 +200,7 @@ ipcMain.handle("recording:transcode", async (_event, { webmPath, mp4Path }) => {
     console.log("Starting ffmpeg transcode...");
     console.log("Input:", webmPath);
     console.log("Output:", mp4Path);
+    console.log("Target Bitrate:", bitrate);
 
     const ffmpeg = spawn(ffmpegPath, args);
     let stderr = "";
@@ -288,9 +323,9 @@ async function createWindow() {
 
   win.loadURL(`http://127.0.0.1:${serverHandle.port}/index.html`);
   // Custom keybinds: capture at the webContents level so it works even when a YouTube iframe is focused
+  // Custom keybinds: capture at the webContents level so it works even when a YouTube iframe is focused
   win.webContents.on("before-input-event", (event, input) => {
     if (input.type !== "keyDown") return;
-    if (input.control || input.alt || input.meta) return;
 
     // 1. If logic not armed, let it pass (standard typing)
     if (!keybindsArmed) return;
@@ -298,8 +333,21 @@ async function createWindow() {
     // 2. If user is typing in an input, let it pass
     if (isTyping) return;
 
-    const key = String(input.key || "").toLowerCase();
-    const action = keyToAction[key];
+    // Construct key combo
+    const parts = [];
+    if (input.control) parts.push("control");
+    if (input.alt) parts.push("alt");
+    if (input.shift) parts.push("shift");
+    if (input.meta) parts.push("meta");
+
+    const k = String(input.key || "").toLowerCase();
+    // Verify it's not a modifier key itself (modifiers don't trigger actions alone)
+    if (["control", "alt", "shift", "meta"].includes(k)) return;
+
+    parts.push(k);
+    const combo = parts.join("+");
+
+    const action = keyToAction[combo];
     if (!action) return;
 
     // Prevent YouTube / HTML5 players from handling it
