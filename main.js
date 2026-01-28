@@ -140,6 +140,11 @@ ipcMain.handle("recording:setVideosPath", (_evt, newPath) => {
   return newPath;
 });
 
+// Generic getPath handler
+ipcMain.handle("app:getPath", (_evt, name) => {
+  return app.getPath(name);
+});
+
 // Open Directory Dialog
 ipcMain.handle("dialog:openDirectory", async () => {
   const { dialog, BrowserWindow } = require("electron");

@@ -60,7 +60,7 @@
     /* Global Focus Reset & Gradient Border */
     input:not([type="range"]):focus,
     select:focus,
-    button:not(.drawBarBtn):not(.settingsTab):focus,
+    button:not(.drawBarBtn):not(.settingsTab):not(#saveSessionBtn):focus,
     textarea:focus {
       outline: none;
       border: 1px solid transparent !important;
@@ -71,6 +71,11 @@
 
     .drawBarBtn:focus {
       outline: none;
+    }
+
+    #sessionNameInput.error {
+      border: 1px solid #ff0000 !important;
+      box-shadow: 0 0 0 1px #ff0000;
     }
 
     /* Range inputs should not have the box border */
@@ -1493,6 +1498,8 @@
     #commentInput::-webkit-scrollbar-button {
       display: none;
     }
+
+    /* Session Menu */
   </style>
 </head>
 
@@ -1510,6 +1517,8 @@
     <div class="topbar">
       <!-- required order -->
       <button id="loadBtn">Review</button>
+      <button id="saveLoadBtn">Save/Load Session</button>
+      <input type="file" id="loadSessionInput" accept=".txt,.json" style="display:none">
 
 
 
@@ -1829,14 +1838,14 @@
           /* Keybinds specific styles */
           /* Explicitly override padding for Keybinds to ensure 52px height */
           #settingsTabKeybinds .settingsRow {
-            padding: 12px 0 12px 0;
+            padding: 11px 0 12px 0;
           }
 
           .kbKey {
             background: #111;
             border: 1px solid #444;
             border-radius: 6px;
-            padding: 0 10px 2px 10px;
+            padding: 0 11px 2px 11px;
             min-width: 40px;
             height: 28px;
             display: flex;
@@ -1848,6 +1857,7 @@
             font-size: 13px;
             color: #eee;
             margin-right: 4px;
+            margin-top: 1px;
           }
 
           /* Edit icon button */
@@ -1863,6 +1873,7 @@
             cursor: pointer;
             border-radius: 6px;
             transition: color 0.15s, background 0.15s;
+            margin-top: 1px;
             padding: 0;
           }
 
@@ -2184,6 +2195,155 @@
 
         <!-- Right: Next -->
         <button id="vuNextBtn" class="vuBtn">Next</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="sessionModal" class="modalBackdrop">
+    <div class="modalPanel"
+      style="width: 500px; max-width: 90vw; height: 600px; padding: 20px 24px; display: flex; flex-direction: column;">
+      <div style="position: absolute; right: 24px; top: 20px; display: flex; gap: 8px;">
+        <button class="modalClose" id="sessionOpenFolder" title="Open Folder" style="position: static;">
+          <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+          </svg>
+        </button>
+        <button class="modalClose" id="sessionClose" style="position: static;">
+          <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"
+            stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <h3 style="margin: 0 0 16px 0; font-size: 20px; flex-shrink: 0;">Review Sessions</h3>
+
+      <!-- Save Row -->
+      <div style="display: flex; gap: 10px; margin-bottom: 6px; flex-shrink: 0;">
+        <input type="text" id="sessionNameInput" placeholder="Enter file name..." style="
+          flex: 1; 
+          padding: 10px 14px; 
+          background: #111; 
+          border: 1px solid #333; 
+          color: #eee; 
+          border-radius: 8px;
+          font-size: 14px;">
+        <button id="saveSessionBtn" style="
+          padding: 0 20px; 
+          font-weight: 600; 
+          background: #eee; 
+          color: #111; 
+          border: none; 
+          border-radius: 8px;
+          cursor: pointer;
+          transition: background 0.2s;">
+          Save
+        </button>
+      </div>
+      <div id="sessionErrorMsg"
+        style="color: #ff4444; font-size: 13px; margin-bottom: 18px; min-height: 18px; padding-left: 2px;"></div>
+
+      <div
+        style="margin-bottom: 10px; font-size: 13px; color: #888; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px;">
+        Saved Sessions</div>
+
+      <!-- File List -->
+      <!-- File List Container -->
+      <div id="sessionFileList" style="
+        flex: 1; 
+        overflow-y: overlay; 
+        padding-right: 10px; /* buffer for scrollbar */
+        /* No border/background on container to match settings list look */
+      ">
+        <!-- Populated via JS -->
+      </div>
+
+      <style>
+        /* Scrollbar styles to match comments */
+        #sessionFileList::-webkit-scrollbar {
+          width: 8px;
+        }
+
+        #sessionFileList::-webkit-scrollbar-track {
+          background: transparent;
+          margin: 4px;
+        }
+
+        #sessionFileList::-webkit-scrollbar-thumb {
+          background: #333;
+          border-radius: 10px;
+        }
+
+        #sessionFileList::-webkit-scrollbar-button {
+          display: none;
+        }
+
+        .session-file-item {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          height: 31px;
+          /* Standard settings row height */
+          padding: 0 4px;
+          /* Slight padding */
+          border-bottom: 1px solid #222;
+          /* Separator like settings */
+          cursor: pointer;
+          font-size: 14px;
+          color: #eee;
+          transition: background 0.1s;
+        }
+
+        .session-file-item:last-child {
+          border-bottom: 1px solid #222;
+          /* Ensure last item also has a border if desired, or none */
+        }
+
+        .session-file-item:hover {
+          background: rgba(255, 255, 255, 0.04);
+        }
+
+        .session-file-item .name {
+          font-weight: 500;
+          overflow: hidden;
+          white-space: nowrap;
+          text-overflow: ellipsis;
+          flex: 1;
+          margin-right: 10px;
+          /* space between name and date */
+        }
+
+        .session-file-item .date {
+          font-size: 12px;
+          color: #666;
+          white-space: nowrap;
+          flex-shrink: 0;
+        }
+      </style>
+    </div>
+    <!-- Overwrite Warning Modal -->
+    <div id="overwriteModal" class="modalBackdrop" style="z-index: 6000;">
+      <div class="modalPanel" style="width: 400px; padding: 24px; display: flex; flex-direction: column;">
+        <h3 style="margin: 0 0 16px 0; color: #eee; font-size: 18px;">File Already Exists</h3>
+        <p style="margin: 0 0 20px 0; color: #aaa; font-size: 14px; line-height: 1.5;">
+          A session with this name already exists. Do you want to replace it?
+        </p>
+
+        <div style="background: #111; border: 1px solid #333; border-radius: 6px; padding: 12px; margin-bottom: 24px;">
+          <div id="overwriteFileInfo" style="color: #fff; font-weight: 500; font-size: 14px; margin-bottom: 4px;">
+            Filename.json</div>
+          <div id="overwriteDateInfo" style="color: #666; font-size: 12px;">Last Modified: 00/00/00 12:00 PM</div>
+        </div>
+
+        <div style="display: flex; gap: 10px; justify-content: flex-end;">
+          <button id="overwriteNoBtn"
+            style="padding: 8px 16px; background: transparent; border: 1px solid #444; color: #eee;">No</button>
+          <button id="overwriteYesBtn"
+            style="padding: 8px 16px; background: #eee; color: #111; border: none; font-weight: 600;">Yes,
+            Replace</button>
+        </div>
       </div>
     </div>
   </div>

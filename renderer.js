@@ -2734,6 +2734,30 @@ async function checkTwitchConstraints(force = false) {
   lastTwitchState = hasTwitch;
 }
 
+function extractTimeFromUrl(raw) {
+  const match = (raw || "").match(/[?&]t=([^&]+)/);
+  if (!match) return null;
+  const val = match[1];
+
+  // Pure digits = seconds
+  if (/^\d+$/.test(val)) return parseInt(val, 10);
+
+  // h m s
+  let total = 0;
+  let found = false;
+
+  const h = val.match(/(\d+)h/);
+  if (h) { total += parseInt(h[1], 10) * 3600; found = true; }
+
+  const m = val.match(/(\d+)m/);
+  if (m) { total += parseInt(m[1], 10) * 60; found = true; }
+
+  const s = val.match(/(\d+)s/);
+  if (s) { total += parseInt(s[1], 10); found = true; }
+
+  return found ? total : null;
+}
+
 function ensureVideoRow(idx) {
   const list = el("videoList");
   if (!list) return null;
@@ -2869,6 +2893,19 @@ function ensureVideoRow(idx) {
     // Always clear the file input if the user is modifying the text manually
     try { file.value = ""; } catch { }
     block.dataset.hasFile = "0";
+
+    // Auto-detect start time from URL (e.g. ?t=1h20m)
+    const detectedSeconds = extractTimeFromUrl(url.value);
+    if (detectedSeconds !== null) {
+      const h = Math.floor(detectedSeconds / 3600);
+      const rem = detectedSeconds % 3600;
+      const m = Math.floor(rem / 60);
+      const s = rem % 60;
+
+      stH.value = h.toString().padStart(2, "0");
+      stM.value = m.toString().padStart(2, "0");
+      stS.value = s.toString().padStart(2, "0");
+    }
 
     checkTwitchConstraints();
     maybeAddNextRow();
@@ -3221,8 +3258,12 @@ async function loadVideos() {
 
 
   if (realSources.some(s => s.type === "yt") && !apiReady) {
-    setStatus("YouTube API not ready yet. Try again in a second.", true);
-    return;
+    if (window.YT && window.YT.Player) {
+      apiReady = true;
+    } else {
+      setStatus("YouTube API not ready yet. Try again in a second.", true);
+      return;
+    }
   }
 
   const totalCount = realSources.length;
@@ -3336,10 +3377,13 @@ async function loadVideos() {
   }
 
   // Get layout configuration for this video count
-  // First, check if we have a persistent preference for this video count
   const layoutPrefs = await ipcRenderer.invoke("layout:getPreferences");
-  const preferredOption = layoutPrefs[totalCount] || 'A';
-  currentLayoutOption = preferredOption;
+
+  // If the video count matches what is currently in the UI, we trust the user's currentLayoutOption selection.
+  // We only reset to preference if the counts don't match (e.g. invalid video filtered out) or if the current option is invalid.
+  if (totalCount !== currentFilledVideoCount || !LAYOUT_CONFIGS[totalCount]?.[currentLayoutOption]) {
+    currentLayoutOption = layoutPrefs[totalCount] || 'A';
+  }
 
   const layoutConfig = LAYOUT_CONFIGS[totalCount]?.[currentLayoutOption] ||
     LAYOUT_CONFIGS[totalCount]?.A ||
@@ -3729,9 +3773,9 @@ async function loadVideos() {
         height: "100%",
         video: src.videoId,
         parent: ["127.0.0.1"],
-        autoplay: false,
         muted: !shouldUnmuteTwitch,
-        controls: showControls
+        controls: showControls,
+        allowfullscreen: false
       });
 
       // Mark as muted based on setting
@@ -3768,46 +3812,98 @@ async function loadVideos() {
         }
 
         // Style the iframe to fill the holder
-        // Only disable pointer events if controls are HIDDEN.
-        // If controls are shown, user needs to click play/pause/timeline.
+        // Enable pointer events so users can interact with popups (e.g. Copyright Mute X button)
+        // Note: This means clicking the video will toggle play/pause natively, which our listeners handle.
         const frame = holder.querySelector("iframe");
         if (frame) {
           frame.style.width = "100%";
           frame.style.height = "100%";
-          if (!showControls) {
-            frame.style.pointerEvents = "none";
-          }
+
+          // Aggressively strip fullscreen attributes
+          const stripFullscreen = (f) => {
+            if (f.hasAttribute("allowfullscreen")) f.removeAttribute("allowfullscreen");
+            if (f.hasAttribute("webkitallowfullscreen")) f.removeAttribute("webkitallowfullscreen");
+            if (f.hasAttribute("mozallowfullscreen")) f.removeAttribute("mozallowfullscreen");
+
+            // Also modify the 'allow' attribute if present
+            if (f.hasAttribute("allow")) {
+              const allowVal = f.getAttribute("allow");
+              if (allowVal.includes("fullscreen")) {
+                f.setAttribute("allow", allowVal.replace(/fullscreen;?/g, "").trim());
+              }
+            }
+          };
+
+          stripFullscreen(frame);
+
+          // Use MutationObserver to ensure it doesn't get added back
+          const observer = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+              if (mutation.type === "attributes" && mutation.attributeName === "allowfullscreen") {
+                stripFullscreen(frame);
+              }
+            });
+          });
+          observer.observe(frame, { attributes: true });
         }
 
         // Seek to start position (0 or user-specified offset)
         const localStart = Math.max(0, Number(src.startAt) || 0);
 
-        // Helper to ensure player is paused - retries until confirmed
-        const ensurePausedAndReady = (retriesLeft = 5) => {
+        // Helper to ensure player is paused AND at the correct start time
+        // Helper to ensure player is paused AND at the correct start time
+        let stableFrames = 0;
+        const ensurePausedAndReady = (retriesLeft = 30) => {
+          let isPaused = false;
+          let currentT = -1;
           try {
-            twitchPlayer.pause();
-            twitchPlayer.seek(localStart);
+            isPaused = twitchPlayer.isPaused();
+            currentT = twitchPlayer.getCurrentTime();
           } catch { }
 
-          // Check if player thinks it's paused
-          setTimeout(() => {
-            let isPaused = true;
-            try { isPaused = twitchPlayer.isPaused(); } catch { }
+          const timeDiff = Math.abs(currentT - localStart);
+          const isAtTarget = timeDiff < 1.0;
 
-            if (!isPaused && retriesLeft > 0) {
-              // Player still thinks it's playing - retry
-              try { twitchPlayer.pause(); } catch { }
-              ensurePausedAndReady(retriesLeft - 1);
-            } else {
-              // Player is paused (or we gave up) - mark as ready
-              if (players[i]) players[i].__ready = true;
-              afterAnyReady();
-            }
-          }, 200);
+          // If current state looks good, increment stability counter
+          if (isPaused && isAtTarget) {
+            stableFrames++;
+          } else {
+            stableFrames = 0;
+          }
+
+          // We require 3 consecutive clean checks (~750ms stable) to confirm ready
+          if (stableFrames >= 3) {
+            if (players[i]) players[i].__ready = true;
+            afterAnyReady();
+            return;
+          }
+
+          if (retriesLeft <= 0) {
+            // Gave up, mark ready anyway so we don't hang
+            console.warn(`Twitch player ${i} init timed out. Paused: ${isPaused}, Time: ${currentT} vs ${localStart}`);
+            if (players[i]) players[i].__ready = true;
+            afterAnyReady();
+            return;
+          }
+
+          // Not settled yet, apply enforcement
+          // Only apply enforcement if we are NOT stable this frame
+          // (If stableFrames > 0 but < 3, we just wait and verify, don't spam commands)
+          if (stableFrames === 0) {
+            try {
+              if (!isPaused) twitchPlayer.pause();
+              // Only seek if significantly off or if we haven't sought recently?
+              // Twitch seek can be spammy. 
+              if (!isAtTarget) twitchPlayer.seek(localStart);
+            } catch { }
+          }
+
+          // Check again after delay
+          setTimeout(() => ensurePausedAndReady(retriesLeft - 1), 250);
         };
 
         // Start the pause+ready sequence after initial delay
-        setTimeout(ensurePausedAndReady, 300);
+        setTimeout(ensurePausedAndReady, 500);
       });
 
       twitchPlayer.addEventListener(Twitch.Player.PLAY, () => {
@@ -5409,3 +5505,425 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 });
+
+// --- Save/Load Session Logic ---
+// --- Save/Load Session Logic ---
+// --- Save/Load Session Logic ---
+const sessionModal = el("sessionModal");
+
+let sessionWatcher = null;
+
+async function refreshSessionList() {
+  const list = el("sessionFileList");
+  if (!list) return;
+
+  // Basic loading state only if empty
+  if (list.childElementCount === 0) {
+    list.innerHTML = `<div style="padding: 20px; text-align: center; color: #666;">Loading...</div>`;
+  }
+
+  try {
+    const fs = require('fs');
+    const path = require('path');
+
+    // Get doc path
+    let docDir;
+    try {
+      docDir = await ipcRenderer.invoke("app:getPath", "documents");
+    } catch {
+      const os = require('os');
+      docDir = path.join(os.homedir(), 'Documents');
+    }
+
+    const appDir = path.join(docDir, 'VODReview_Sessions');
+    cachedAppDir = appDir;
+
+    if (!fs.existsSync(appDir)) {
+      list.innerHTML = `<div style="padding: 20px; text-align: center; color: #666;">No saved sessions found.</div>`;
+      return;
+    }
+
+    // Set up watcher once
+    if (!sessionWatcher) {
+      try {
+        let debounceTimer;
+        sessionWatcher = fs.watch(appDir, (eventType, filename) => {
+          // Debounce to prevent multiple refreshes
+          clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(() => {
+            // Only refresh if modal is open to save resources
+            if (sessionModal && sessionModal.classList.contains("open")) {
+              refreshSessionList();
+            }
+          }, 500);
+        });
+      } catch (e) {
+        console.warn("Could not watch session dir:", e);
+      }
+    }
+
+    const files = fs.readdirSync(appDir)
+      .filter(f => f.endsWith(".json"))
+      .map(f => {
+        try {
+          const stat = fs.statSync(path.join(appDir, f));
+          return { name: f, time: stat.mtime };
+        } catch {
+          return { name: f, time: new Date(0) };
+        }
+      })
+      .sort((a, b) => b.time - a.time); // Newest first
+
+    if (files.length === 0) {
+      list.innerHTML = `<div style="padding: 20px; text-align: center; color: #666;">No saved sessions found.</div>`;
+      return;
+    }
+
+    list.innerHTML = "";
+    files.forEach(file => {
+      // Remove extension for display if you want, but sticking to filename for clarity
+      const displayName = file.name.replace(".json", "");
+
+      // Custom date format: MM/DD/YY HH:MM AM/PM
+      const d = file.time;
+      const mm = d.getMonth() + 1;
+      const dd = d.getDate();
+      const yy = d.getFullYear().toString().slice(-2);
+
+      let hours = d.getHours();
+      const ampm = hours >= 12 ? 'PM' : 'AM';
+      hours = hours % 12;
+      hours = hours ? hours : 12; // the hour '0' should be '12'
+      const minutes = d.getMinutes().toString().padStart(2, '0');
+
+      const dateStr = `${mm}/${dd}/${yy} ${hours}:${minutes} ${ampm}`;
+
+      const item = document.createElement("div");
+      item.className = "session-file-item";
+      item.innerHTML = `
+        <span class="name">${displayName}</span>
+        <span class="date">${dateStr}</span>
+      `;
+
+      item.addEventListener("click", () => {
+        loadSessionFromFile(path.join(appDir, file.name));
+        sessionModal.classList.remove("open");
+      });
+
+      list.appendChild(item);
+    });
+
+  } catch (err) {
+    console.error(err);
+    list.innerHTML = `<div style="padding: 20px; text-align: center; color: #bd3e3e;">Error loading list.</div>`;
+  }
+}
+
+on("saveLoadBtn", "click", () => {
+  sessionModal?.classList.add("open");
+  // Clear previous errors
+  const errDiv = el("sessionErrorMsg");
+  if (errDiv) errDiv.textContent = "";
+
+  // Pre-fill with a default name if empty
+  const nameInput = el("sessionNameInput");
+  if (nameInput && !nameInput.value) {
+    nameInput.placeholder = `Enter file name...`;
+  }
+  refreshSessionList();
+});
+
+on("sessionClose", "click", () => {
+  sessionModal?.classList.remove("open");
+});
+
+// Cache the directory to speed up opening
+let cachedAppDir = null;
+
+on("sessionOpenFolder", "click", async () => {
+  try {
+    const path = require('path');
+    let appDir = cachedAppDir;
+
+    // If not cached, fetch it (rare, since refreshSessionList usually runs first)
+    if (!appDir) {
+      let docDir;
+      try {
+        docDir = await ipcRenderer.invoke("app:getPath", "documents");
+      } catch {
+        const os = require('os');
+        docDir = path.join(os.homedir(), 'Documents');
+      }
+      appDir = path.join(docDir, 'VODReview_Sessions');
+      cachedAppDir = appDir;
+    }
+
+    // Ensure dir exists
+    const fs = require('fs');
+    if (!fs.existsSync(appDir)) {
+      fs.mkdirSync(appDir, { recursive: true });
+    }
+
+    // Use spawn for faster launch on Windows
+    if (process.platform === 'win32') {
+      require('child_process').spawn('explorer', [appDir], { detached: true, stdio: 'ignore' }).unref();
+    } else {
+      const { shell } = require('electron');
+      shell.openPath(appDir);
+    }
+  } catch (e) {
+    console.error("Failed to open folder", e);
+  }
+});
+
+// Click outside to close
+sessionModal?.addEventListener("click", (e) => {
+  if (e.target === sessionModal) {
+    sessionModal.classList.remove("open");
+  }
+});
+
+on("saveSessionBtn", "click", () => {
+  saveSession();
+});
+
+// Overwrite Modal Handlers
+on("overwriteNoBtn", "click", () => {
+  el("overwriteModal")?.classList.remove("open");
+});
+
+let pendingSaveData = null; // Stores { filePath, jsonStr, filename } for overwrite confirmation
+
+on("overwriteYesBtn", "click", () => {
+  if (pendingSaveData) {
+    el("overwriteModal")?.classList.remove("open");
+    performSave(pendingSaveData.filePath, pendingSaveData.jsonStr, pendingSaveData.filename);
+    pendingSaveData = null;
+  }
+});
+
+// Removed old loadSessionBtn listener since we load by clicking items now
+
+async function saveSession() {
+  const sources = [];
+  const videoList = el("videoList");
+  if (videoList) {
+    const blocks = Array.from(videoList.querySelectorAll(".videoBlock"));
+    blocks.forEach(block => {
+      const url = block.querySelector(".videoUrl")?.value || "";
+      const name = block.querySelector(".videoNameInput")?.value || "";
+      const stH = block.querySelector(".startTimeH")?.value || "";
+      const stM = block.querySelector(".startTimeM")?.value || "";
+      const stS = block.querySelector(".startTimeS")?.value || "";
+
+      if (url || name || stH || stM || stS) {
+        sources.push({ url, name, stH, stM, stS });
+      }
+    });
+  }
+
+  if (sources.length === 0) {
+    const errDiv = el("sessionErrorMsg");
+    if (errDiv) errDiv.textContent = "Cannot save: No videos added.";
+    return;
+  }
+
+  const comments = [];
+  const commentList = el("commentList");
+  if (commentList) {
+    const items = Array.from(commentList.querySelectorAll(".commentItem"));
+    items.forEach(item => {
+      const time = item.dataset.time;
+      const text = item.querySelector(".commentText")?.textContent || "";
+      if (time && text) {
+        comments.push({ time, text });
+      }
+    });
+  }
+
+  const sessionData = {
+    version: 1,
+    timestamp: new Date().toISOString(),
+    sources,
+    comments
+  };
+
+  const jsonStr = JSON.stringify(sessionData, null, 2);
+
+  // Determine Filename
+  let filename = "VODReview_Session.json";
+  const nameInput = el("sessionNameInput");
+  let customName = nameInput ? nameInput.value.trim() : "";
+  const errorMsg = el("sessionErrorMsg");
+
+  if (!customName) {
+    if (nameInput) {
+      nameInput.classList.add("error");
+      // Remove error on input
+      nameInput.addEventListener("input", function cls() {
+        nameInput.classList.remove("error");
+        if (errorMsg) errorMsg.textContent = "";
+        nameInput.removeEventListener("input", cls);
+      });
+    }
+    if (errorMsg) errorMsg.textContent = "Please enter a session name.";
+    return;
+  } else {
+    // Check for invalid chars
+    if (/[<>:"/\\|?*]/.test(customName)) {
+      if (nameInput) {
+        nameInput.classList.add("error");
+        nameInput.addEventListener("input", function cls() {
+          nameInput.classList.remove("error");
+          if (errorMsg) errorMsg.textContent = "";
+          nameInput.removeEventListener("input", cls);
+        });
+      }
+      if (errorMsg) errorMsg.textContent = "Invalid filename characters: \\ / : * ? \" < > |";
+      return;
+    }
+
+    if (nameInput) nameInput.classList.remove("error");
+    if (errorMsg) errorMsg.textContent = ""; // Clear any previous error
+
+    if (!customName.toLowerCase().endsWith(".json")) {
+      customName += ".json";
+    }
+    filename = customName;
+  }
+
+  try {
+    const fs = require('fs');
+    const path = require('path');
+
+    // Get actual Documents path via IPC
+    let docDir;
+    try {
+      docDir = await ipcRenderer.invoke("app:getPath", "documents");
+    } catch (e) {
+      console.warn("IPC getPath failed", e);
+      const os = require('os');
+      docDir = path.join(os.homedir(), 'Documents');
+    }
+
+    const appDir = path.join(docDir, 'VODReview_Sessions');
+
+    if (!fs.existsSync(appDir)) {
+      try {
+        fs.mkdirSync(appDir, { recursive: true });
+      } catch (e) {
+        console.warn("Could not create app dir", e);
+      }
+    }
+
+    let saveDir = fs.existsSync(appDir) ? appDir : path.join(require('os').homedir(), 'Downloads');
+    if (!fs.existsSync(saveDir)) fs.mkdirSync(saveDir);
+
+    const filePath = path.join(saveDir, filename);
+
+    // Check if file exists
+    if (fs.existsSync(filePath)) {
+      // Show Overwrite Warning
+      const stat = fs.statSync(filePath);
+      const mtime = new Date(stat.mtime);
+      const mm = mtime.getMonth() + 1;
+      const dd = mtime.getDate();
+      const yy = mtime.getFullYear().toString().slice(-2);
+
+      let hours = mtime.getHours();
+      const ampm = hours >= 12 ? 'PM' : 'AM';
+      hours = hours % 12;
+      hours = hours ? hours : 12;
+      const minutes = mtime.getMinutes().toString().padStart(2, '0');
+
+      const dateStr = `${mm}/${dd}/${yy} ${hours}:${minutes} ${ampm}`;
+
+      el("overwriteFileInfo").textContent = filename;
+      el("overwriteDateInfo").textContent = `Last Modified: ${dateStr}`;
+
+      pendingSaveData = { filePath, jsonStr, filename };
+      el("overwriteModal")?.classList.add("open");
+      return; // Stop here, wait for user confirmation
+    }
+
+    // No conflict, safe check passed
+    performSave(filePath, jsonStr, filename);
+
+  } catch (err) {
+    console.warn("File check failed", err);
+  }
+}
+
+function performSave(filePath, jsonStr, filename) {
+  try {
+    const fs = require('fs');
+    fs.writeFileSync(filePath, jsonStr);
+    setStatus(`Session saved: ${filename}`, false, 3000);
+    const errorMsg = el("sessionErrorMsg");
+    if (errorMsg) errorMsg.textContent = "";
+    // Refresh list shortly after
+    setTimeout(refreshSessionList, 500);
+  } catch (err) {
+    console.error("Write failed", err);
+    setStatus("Failed to save session.", true);
+  }
+}
+
+function loadSessionFromFile(filePath) {
+  try {
+    const fs = require('fs');
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    const data = JSON.parse(raw);
+
+    if (!data || !data.sources) throw new Error("Invalid session file");
+
+    const list = el("videoList");
+    list.innerHTML = "";
+
+    data.sources.forEach((src, idx) => {
+      const block = ensureVideoRow(idx);
+      const url = block.querySelector(".videoUrl");
+      const name = block.querySelector(".videoNameInput");
+      const stH = block.querySelector(".startTimeH");
+      const stM = block.querySelector(".startTimeM");
+      const stS = block.querySelector(".startTimeS");
+
+      if (url) url.value = src.url || "";
+      if (name) name.value = src.name || "";
+      if (stH) stH.value = src.stH || "";
+      if (stM) stM.value = src.stM || "";
+      if (stS) stS.value = src.stS || "";
+    });
+
+    maybeAddNextRow();
+    checkTwitchConstraints(true); // Enforce drift settings
+
+    const commentList = el("commentList");
+    if (commentList) {
+      commentList.innerHTML = `<div style="text-align: center; color: #666; padding: 20px;">No comments yet</div>`;
+    }
+
+    if (data.comments && Array.isArray(data.comments)) {
+      data.comments.forEach(c => {
+        addComment(parseFloat(c.time), c.text);
+      });
+    }
+
+    setStatus(`Loaded: ${require('path').basename(filePath)}`, false, 3000);
+
+  } catch (err) {
+    console.error(err);
+    setStatus("Failed to load session: " + err.message, true, 5000);
+  }
+}
+
+// Keep the old function signature just in case any internal calls remain, 
+// though we replaced the listener.
+function loadSession(file) {
+  // Wrapper for File object if still used
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    // ... (Old logic, we can reuse loadSessionFromFile logic if we extracted the parser)
+  };
+  reader.readAsText(file);
+}
