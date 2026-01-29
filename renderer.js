@@ -87,8 +87,23 @@ const LAYOUT_CONFIGS = {
 let currentLayoutOption = 'A';
 let currentFilledVideoCount = 0;
 let cachedDriftBeforeTwitch = null;
+let unsavedChanges = false;
+let isSessionLoading = false;
 
 const el = id => document.getElementById(id);
+
+async function ensureApisReady(needYt, needTwitch) {
+  const start = Date.now();
+  // Wait up to 8 seconds (Twitch can be slow)
+  while (Date.now() - start < 8000) {
+    let ok = true;
+    if (needYt && (!window.YT || !window.YT.Player)) ok = false;
+    if (needTwitch && (!window.Twitch || !window.Twitch.Player)) ok = false;
+    if (ok) return true;
+    await new Promise(r => setTimeout(r, 200));
+  }
+  return false;
+}
 
 function on(id, event, handler) {
   const node = el(id);
@@ -405,6 +420,10 @@ function toggleCommentMode() {
     if (input) input.blur();
   } else {
     // Open
+    if (drawMode) {
+      toggleDrawMode();
+    }
+
     sidebar.classList.add("open");
 
     // Auto-pause if playing
@@ -507,6 +526,7 @@ if (commentInput) {
 }
 
 function addComment(time, text) {
+  if (!isSessionLoading) unsavedChanges = true;
   const list = el("commentList");
   if (!list) return;
 
@@ -2254,6 +2274,12 @@ function toggleDrawMode() {
       document.body.classList.remove("focusSelectMode");
     }
 
+    // Close comment sidebar if open
+    const cSidebar = el("commentSidebar");
+    if (cSidebar && cSidebar.classList.contains("open")) {
+      toggleCommentMode();
+    }
+
     createDrawCanvas();
     createColorSelector();
   } else {
@@ -2915,7 +2941,8 @@ function ensureVideoRow(idx) {
   file.addEventListener("change", () => {
     const f = file.files?.[0] || null;
     if (f) {
-      url.value = f.name;
+      // Use path if available (Electron), fallback to name
+      url.value = f.path || f.name;
       block.dataset.hasFile = "1";
     } else {
       block.dataset.hasFile = "0";
@@ -3152,7 +3179,9 @@ function collectSourcesFromUI() {
     const vnEl = block.querySelector(".videoNameInput");
 
     const f = fileEl?.files?.[0] || null;
-    const rawUrl = (urlEl?.value || "").trim();
+    let rawUrl = (urlEl?.value || "").trim();
+    // Remove surrounding quotes if user pasted a path with quotes
+    rawUrl = rawUrl.replace(/^["'](.*)["']$/, '$1');
 
     const h = parseInt(stH?.value || "0", 10) || 0;
     const m = parseInt(stM?.value || "0", 10) || 0;
@@ -3164,18 +3193,32 @@ function collectSourcesFromUI() {
     if (f) {
       sources.push({ type: "file", file: f, startAt, name });
     } else if (rawUrl) {
-      // Check Twitch first (more distinctive URL pattern)
-      const twitchId = extractTwitchId(rawUrl);
-      if (twitchId) {
-        sources.push({ type: "twitch", videoId: twitchId, startAt, name });
-      } else if (rawUrl.includes("twitch.tv")) {
-        // Found a Twitch URL but couldn't extract a valid VOD/Clip ID -> Bad
-        sources.push({ type: "bad", raw: rawUrl, startAt, name, inputElement: urlEl });
+      // Check for local file first (if path matches a file on disk)
+      let isLocal = false;
+      try {
+        const fs = require('fs');
+        // Simple check to avoid checking URLs as files (though existsSync usually handles it gracefully/returns false)
+        if (fs.existsSync(rawUrl) && fs.statSync(rawUrl).isFile()) {
+          isLocal = true;
+        }
+      } catch (e) { }
+
+      if (isLocal) {
+        sources.push({ type: "file", path: rawUrl, startAt, name });
       } else {
-        // Fall back to YouTube
-        const id = extractId(rawUrl);
-        if (id) sources.push({ type: "yt", id, startAt, name });
-        else sources.push({ type: "bad", raw: rawUrl, startAt, name, inputElement: urlEl });
+        // Check Twitch (more distinctive URL pattern)
+        const twitchId = extractTwitchId(rawUrl);
+        if (twitchId) {
+          sources.push({ type: "twitch", videoId: twitchId, startAt, name });
+        } else if (rawUrl.includes("twitch.tv")) {
+          // Found a Twitch URL but couldn't extract a valid VOD/Clip ID -> Bad
+          sources.push({ type: "bad", raw: rawUrl, startAt, name, inputElement: urlEl });
+        } else {
+          // Fall back to YouTube
+          const id = extractId(rawUrl);
+          if (id) sources.push({ type: "yt", id, startAt, name });
+          else sources.push({ type: "bad", raw: rawUrl, startAt, name, inputElement: urlEl });
+        }
       }
     }
   }
@@ -3257,14 +3300,20 @@ async function loadVideos() {
 
 
 
-  if (realSources.some(s => s.type === "yt") && !apiReady) {
-    if (window.YT && window.YT.Player) {
-      apiReady = true;
-    } else {
-      setStatus("YouTube API not ready yet. Try again in a second.", true);
+  // Check APIs with wait
+  const hasYt = realSources.some(s => s.type === "yt");
+  const hasTwitch = realSources.some(s => s.type === "twitch");
+
+  if (hasYt || hasTwitch) {
+    setStatus("Waiting for player APIs...", false);
+    const ready = await ensureApisReady(hasYt, hasTwitch);
+    if (!ready) {
+      setStatus("Video APIs (YouTube/Twitch) failed to load. Check internet connection.", true);
       return;
     }
   }
+
+  if (hasYt) apiReady = true;
 
   const totalCount = realSources.length;
 
@@ -3347,6 +3396,15 @@ async function loadVideos() {
       loadingState.minTimeDone = true;
       checkLoadingScreen();
     }, minDuration);
+
+    // Safety fallback: force hide overlay after 15s if stuck (e.g. network error)
+    setTimeout(() => {
+      if (overlay && overlay.style.display !== "none") {
+        console.warn("Loading timed out - forcing overlay hide. Check network connection.");
+        overlay.style.display = "none";
+        try { isLoadingScreenActive = false; } catch (e) { }
+      }
+    }, 15000);
   }
 
 
@@ -3745,8 +3803,6 @@ async function loadVideos() {
 
       players[i] = makeYtAdapter(yt);
 
-      players[i] = makeYtAdapter(yt);
-
       return;
     }
 
@@ -3772,10 +3828,10 @@ async function loadVideos() {
         width: "100%",
         height: "100%",
         video: src.videoId,
-        parent: ["127.0.0.1"],
+        parent: ["127.0.0.1", "localhost"],
         muted: !shouldUnmuteTwitch,
         controls: showControls,
-        allowfullscreen: false
+        allowfullscreen: false // Use boolean for allowfullscreen
       });
 
       // Mark as muted based on setting
@@ -3995,9 +4051,13 @@ async function loadVideos() {
 
     v.addEventListener("contextmenu", (e) => e.preventDefault());
 
-    const url = URL.createObjectURL(src.file);
-    activeObjectUrls.push(url);
-    v.src = url;
+    if (src.file) {
+      const url = URL.createObjectURL(src.file);
+      activeObjectUrls.push(url);
+      v.src = url;
+    } else if (src.path) {
+      v.src = src.path;
+    }
 
     wrap.appendChild(v);
 
@@ -5250,14 +5310,20 @@ window.addEventListener("resize", () => {
 });
 
 // Kick off loops + init
-applyLayout();
-startDriftLoop();
-startUiLoop();
-updateKeybindLegend();
+function initApp() {
+  applyLayout();
+  startDriftLoop();
+  startUiLoop();
+  updateKeybindLegend();
+  initAppVersionUI();
+  ensureVideoRow(0);
+}
 
-// Initialize version label (and enables update checks)
-initAppVersionUI();
-ensureVideoRow(0);
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initApp);
+} else {
+  initApp();
+}
 
 // Layout option button handlers
 on("layoutA", "click", () => {
@@ -5504,6 +5570,33 @@ document.addEventListener("DOMContentLoaded", () => {
       exitToVideoLoader();
     }
   });
+
+  // --- New Session & Save Check Handlers ---
+  on("newSessionBtn", "click", () => {
+    if (unsavedChanges) {
+      el("saveCheckModal").classList.add("open");
+    } else {
+      clearSession();
+    }
+  });
+
+  on("saveCheckNoBtn", "click", () => {
+    el("saveCheckModal").classList.remove("open");
+    clearSession();
+  });
+
+  on("saveCheckYesBtn", "click", () => {
+    el("saveCheckModal").classList.remove("open");
+    el("saveLoadBtn").click();
+  });
+
+  // Track unsaved changes on video inputs
+  el("videoList")?.addEventListener("input", (e) => {
+    // We only care if the user is typing in a text field
+    if (e.target.tagName === "INPUT" && e.target.type === "text") {
+      unsavedChanges = true;
+    }
+  });
 });
 
 // --- Save/Load Session Logic ---
@@ -5596,19 +5689,121 @@ async function refreshSessionList() {
       hours = hours ? hours : 12; // the hour '0' should be '12'
       const minutes = d.getMinutes().toString().padStart(2, '0');
 
-      const dateStr = `${mm}/${dd}/${yy} ${hours}:${minutes} ${ampm}`;
+      const datePart = `${mm}/${dd}/${yy}`;
+      const timePart = `${hours}:${minutes} ${ampm}`;
 
       const item = document.createElement("div");
       item.className = "session-file-item";
+      item.style.position = "relative"; // Ensure relative positioning for absolute children if needed, though flex is likely used
+
+      // Structure: Name + Date + Delete Button
+      // We wrap name/date in a div to keep them together and clickable, or just handle clicks carefully
       item.innerHTML = `
         <span class="name">${displayName}</span>
-        <span class="date">${dateStr}</span>
+        <div style="display: flex; align-items: center; flex-shrink: 0;">
+          <span class="date-part" style="color: #666; margin-right: -2px; font-variant-numeric: tabular-nums;">${datePart}</span>
+          <span class="time-part" style="color: #666; width: 65px; text-align: right; margin-right: 0px; font-variant-numeric: tabular-nums;">${timePart}</span>
+          <button class="deleteSessionBtn" title="Hold 3s to Delete" style="
+              background: none; 
+              border: none; 
+              padding: 4px; 
+              cursor: pointer; 
+              color: #ff4444; 
+              display: flex; 
+              align-items: center; 
+              justify-content: center;
+              opacity: 0.7;
+              transition: opacity 0.2s, transform 0.2s;
+              width: 24px; /* Fix width to prevent jitter when showing number */
+              outline: none;
+              box-shadow: none;
+            ">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+              <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+            </svg>
+          </button>
+        </div>
       `;
 
-      item.addEventListener("click", () => {
+      // Main click to load - target the item itself but exclude the delete button
+      item.addEventListener("click", (e) => {
+        // If we clicked the delete button or its children, ignore
+        if (e.target.closest(".deleteSessionBtn")) return;
+
         loadSessionFromFile(path.join(appDir, file.name));
         sessionModal.classList.remove("open");
       });
+
+      // Delete Logic
+      const delBtn = item.querySelector(".deleteSessionBtn");
+      let deleteTimer = null;
+      let countdownInterval = null;
+
+      let originalIcon = "";
+
+      const restoreButton = () => {
+        if (deleteTimer) clearTimeout(deleteTimer);
+        if (countdownInterval) clearInterval(countdownInterval);
+        deleteTimer = null;
+        countdownInterval = null;
+
+        if (originalIcon) {
+          delBtn.innerHTML = originalIcon;
+          originalIcon = ""; // Clear flag
+        }
+        delBtn.style.opacity = "0.7";
+        delBtn.style.transform = "scale(1)";
+        delBtn.style.color = "#ff4444";
+        delBtn.style.fontWeight = "normal";
+        delBtn.style.fontSize = "";
+      };
+
+      delBtn.addEventListener("mousedown", (e) => {
+        e.stopPropagation();
+        if (e.button !== 0) return;
+
+        // Save state
+        originalIcon = delBtn.innerHTML;
+        delBtn.style.opacity = "1";
+        delBtn.style.transform = "scale(1.1)";
+        delBtn.style.color = "#ff4444"; // Keep red
+        delBtn.style.fontWeight = "bold";
+        delBtn.style.fontSize = "14px";
+
+        let timeLeft = 3;
+        delBtn.textContent = timeLeft;
+
+        countdownInterval = setInterval(() => {
+          timeLeft--;
+          if (timeLeft > 0) {
+            delBtn.textContent = timeLeft;
+          }
+        }, 1000);
+
+        deleteTimer = setTimeout(() => {
+          clearInterval(countdownInterval);
+          const fullPath = path.join(appDir, file.name);
+          try {
+            fs.unlinkSync(fullPath);
+            item.remove();
+            if (list.childElementCount === 0) {
+              list.innerHTML = `<div style="padding: 20px; text-align: center; color: #666;">No saved sessions found.</div>`;
+            }
+          } catch (err) {
+            console.error("Failed to delete session", err);
+            setStatus("Failed to delete session file.", true);
+            restoreButton();
+          }
+        }, 3000);
+      });
+      ["mouseup", "mouseleave"].forEach(evt => {
+        delBtn.addEventListener(evt, (e) => {
+          e.stopPropagation();
+          restoreButton();
+        });
+      });
+      // Also stop click propagation just in case
+      delBtn.addEventListener("click", e => e.stopPropagation());
 
       list.appendChild(item);
     });
@@ -5766,7 +5961,10 @@ async function saveSession() {
         nameInput.removeEventListener("input", cls);
       });
     }
-    if (errorMsg) errorMsg.textContent = "Please enter a session name.";
+    if (errorMsg) {
+      errorMsg.style.color = "#ff4444";
+      errorMsg.textContent = "Please enter a session name.";
+    }
     return;
   } else {
     // Check for invalid chars
@@ -5779,7 +5977,10 @@ async function saveSession() {
           nameInput.removeEventListener("input", cls);
         });
       }
-      if (errorMsg) errorMsg.textContent = "Invalid filename characters: \\ / : * ? \" < > |";
+      if (errorMsg) {
+        errorMsg.style.color = "#ff4444";
+        errorMsg.textContent = "Invalid filename characters: \\ / : * ? \" < > |";
+      }
       return;
     }
 
@@ -5855,21 +6056,35 @@ async function saveSession() {
 }
 
 function performSave(filePath, jsonStr, filename) {
+  unsavedChanges = false;
   try {
     const fs = require('fs');
     fs.writeFileSync(filePath, jsonStr);
-    setStatus(`Session saved: ${filename}`, false, 3000);
+
+    // Success notification in the UI below input
     const errorMsg = el("sessionErrorMsg");
-    if (errorMsg) errorMsg.textContent = "";
+    if (errorMsg) {
+      errorMsg.style.color = "#44ff44"; // Green for success
+      errorMsg.textContent = `Session saved: ${filename}`;
+      setTimeout(() => errorMsg.textContent = "", 2000);
+    }
+
     // Refresh list shortly after
     setTimeout(refreshSessionList, 500);
   } catch (err) {
     console.error("Write failed", err);
-    setStatus("Failed to save session.", true);
+    // Failure notification in the UI below input
+    const errorMsg = el("sessionErrorMsg");
+    if (errorMsg) {
+      errorMsg.style.color = "#ff4444"; // Red for error
+      errorMsg.textContent = "Failed to save session.";
+      setTimeout(() => errorMsg.textContent = "", 2000);
+    }
   }
 }
 
 function loadSessionFromFile(filePath) {
+  isSessionLoading = true;
   try {
     const fs = require('fs');
     const raw = fs.readFileSync(filePath, 'utf-8');
@@ -5910,10 +6125,13 @@ function loadSessionFromFile(filePath) {
     }
 
     setStatus(`Loaded: ${require('path').basename(filePath)}`, false, 3000);
+    unsavedChanges = false;
 
   } catch (err) {
     console.error(err);
     setStatus("Failed to load session: " + err.message, true, 5000);
+  } finally {
+    isSessionLoading = false;
   }
 }
 
@@ -5926,4 +6144,29 @@ function loadSession(file) {
     // ... (Old logic, we can reuse loadSessionFromFile logic if we extracted the parser)
   };
   reader.readAsText(file);
+}
+
+function clearSession() {
+  const list = el("videoList");
+  if (list) list.innerHTML = "";
+  ensureVideoRow(0); // This creates one empty row
+
+  const commentList = el("commentList");
+  if (commentList) {
+    commentList.innerHTML = `<div style="text-align: center; color: #666; padding: 20px;">No comments yet</div>`;
+  }
+
+  // Clear session name input for a fresh start
+  const nameInput = el("sessionNameInput");
+  if (nameInput) nameInput.value = "";
+
+  unsavedChanges = false;
+
+  // Show message below the input
+  const errorMsg = el("sessionErrorMsg");
+  if (errorMsg) {
+    errorMsg.style.color = "#eee";
+    errorMsg.textContent = "New Session Started";
+    setTimeout(() => errorMsg.textContent = "", 2000);
+  }
 }

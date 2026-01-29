@@ -630,9 +630,11 @@
     }
 
     /* When in focus layout with zen bar pinned, shrink grid height to avoid overlap */
+    /* REMOVED: Redundant because .app container already has padding-bottom
     body.focusLayout.zen.zenPinned .grid {
       height: calc(100% - var(--zenBarH));
     }
+    */
 
     /* Make gridRows invisible so cards participate in grid directly */
     body.focusLayout .grid .gridRow {
@@ -1499,6 +1501,52 @@
       display: none;
     }
 
+    @keyframes shake {
+      0% {
+        transform: translate(1px, 1px) rotate(0deg);
+      }
+
+      10% {
+        transform: translate(-1px, -2px) rotate(-1deg);
+      }
+
+      20% {
+        transform: translate(-3px, 0px) rotate(1deg);
+      }
+
+      30% {
+        transform: translate(3px, 2px) rotate(0deg);
+      }
+
+      40% {
+        transform: translate(1px, -1px) rotate(1deg);
+      }
+
+      50% {
+        transform: translate(-1px, 2px) rotate(-1deg);
+      }
+
+      60% {
+        transform: translate(-3px, 1px) rotate(0deg);
+      }
+
+      70% {
+        transform: translate(3px, 1px) rotate(-1deg);
+      }
+
+      80% {
+        transform: translate(-1px, -1px) rotate(1deg);
+      }
+
+      90% {
+        transform: translate(1px, 2px) rotate(0deg);
+      }
+
+      100% {
+        transform: translate(1px, -2px) rotate(-1deg);
+      }
+    }
+
     /* Session Menu */
   </style>
 </head>
@@ -1517,6 +1565,7 @@
     <div class="topbar">
       <!-- required order -->
       <button id="loadBtn">Review</button>
+
       <button id="saveLoadBtn">Save/Load Session</button>
       <input type="file" id="loadSessionInput" accept=".txt,.json" style="display:none">
 
@@ -1634,12 +1683,12 @@
     <button id="zSettings">⚙</button>
   </div>
 
-  <script src="https://player.twitch.tv/js/embed/v1.js"></script>
-  <script src="https://www.youtube.com/iframe_api"></script>
+  <script src="https://player.twitch.tv/js/embed/v1.js" async></script>
+  <script src="https://www.youtube.com/iframe_api" async></script>
 
   <!-- Settings modal with tabs -->
   <div id="settingsModal" class="modalBackdrop">
-    <div class="modalPanel" tabindex="-1" style="width: 450px; height: 577px;">
+    <div class="modalPanel" tabindex="-1" style="width: 450px; height: 471px;">
       <!-- Tab bar with integrated close button -->
       <div class="settingsTabs">
         <button class="settingsTab active" data-tab="general">General</button>
@@ -1837,8 +1886,39 @@
         <style>
           /* Keybinds specific styles */
           /* Explicitly override padding for Keybinds to ensure 52px height */
+          /* Explicitly override padding for Keybinds to ensure 52px height */
           #settingsTabKeybinds .settingsRow {
             padding: 11px 0 12px 0;
+            width: 400px;
+          }
+
+          /* Scrollbar Container - extend to right edge */
+          #settingsTabKeybinds {
+            height: 423px;
+            overflow-y: overlay;
+            overflow-x: hidden;
+            margin-right: -24px;
+            padding-right: 0px;
+            padding-bottom: 0px;
+          }
+
+          /* Scrollbar Styling to match comments */
+          #settingsTabKeybinds::-webkit-scrollbar {
+            width: 8px;
+          }
+
+          #settingsTabKeybinds::-webkit-scrollbar-track {
+            background: transparent;
+            margin: 4px 0 14px 0;
+          }
+
+          #settingsTabKeybinds::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 10px;
+          }
+
+          #settingsTabKeybinds::-webkit-scrollbar-button {
+            display: none;
           }
 
           .kbKey {
@@ -2201,8 +2281,15 @@
 
   <div id="sessionModal" class="modalBackdrop">
     <div class="modalPanel"
-      style="width: 500px; max-width: 90vw; height: 600px; padding: 20px 24px; display: flex; flex-direction: column;">
-      <div style="position: absolute; right: 24px; top: 20px; display: flex; gap: 8px;">
+      style="width: 500px; max-width: 90vw; height: 470px; padding: 20px 24px; display: flex; flex-direction: column;">
+      <div style="position: absolute; right: 24px; top: 12px; display: flex; gap: 8px;">
+        <button class="modalClose" id="newSessionBtn" title="New Session" style="position: static;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+        </button>
         <button class="modalClose" id="sessionOpenFolder" title="Open Folder" style="position: static;">
           <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"
             stroke-linecap="round" stroke-linejoin="round">
@@ -2243,7 +2330,7 @@
         </button>
       </div>
       <div id="sessionErrorMsg"
-        style="color: #ff4444; font-size: 13px; margin-bottom: 18px; min-height: 18px; padding-left: 2px;"></div>
+        style="color: #ff4444; font-size: 13px; margin-bottom: 14px; min-height: 18px; padding-left: 2px;"></div>
 
       <div
         style="margin-bottom: 10px; font-size: 13px; color: #888; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px;">
@@ -2297,8 +2384,7 @@
         }
 
         .session-file-item:last-child {
-          border-bottom: 1px solid #222;
-          /* Ensure last item also has a border if desired, or none */
+          border-bottom: none;
         }
 
         .session-file-item:hover {
@@ -2323,8 +2409,23 @@
         }
       </style>
     </div>
+    <!-- Save Check Modal -->
+    <div id="saveCheckModal" class="modalBackdrop" style="z-index: 11000;">
+      <div class="modalPanel" style="width: 400px; padding: 24px; display: flex; flex-direction: column;">
+        <h3 style="margin: 0 0 16px 0; color: #eee; font-size: 18px;">Unsaved Changes</h3>
+        <p style="margin: 0 0 20px 0; color: #aaa; font-size: 14px; line-height: 1.5;">
+          Do you want to save this session before starting a new one?
+        </p>
+        <div style="display: flex; gap: 10px; justify-content: flex-end;">
+          <button id="saveCheckNoBtn"
+            style="padding: 8px 16px; background: transparent; border: 1px solid #444; color: #eee;">No</button>
+          <button id="saveCheckYesBtn"
+            style="padding: 8px 16px; background: #eee; color: #111; border: none; font-weight: 600;">Yes</button>
+        </div>
+      </div>
+    </div>
     <!-- Overwrite Warning Modal -->
-    <div id="overwriteModal" class="modalBackdrop" style="z-index: 6000;">
+    <div id="overwriteModal" class="modalBackdrop" style="z-index: 11000;">
       <div class="modalPanel" style="width: 400px; padding: 24px; display: flex; flex-direction: column;">
         <h3 style="margin: 0 0 16px 0; color: #eee; font-size: 18px;">File Already Exists</h3>
         <p style="margin: 0 0 20px 0; color: #aaa; font-size: 14px; line-height: 1.5;">

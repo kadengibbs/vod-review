@@ -1,6 +1,6 @@
 {
   "name": "vod-review",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "Multi-video YouTube VOD review and sync tool",
   "main": "main.js",
   "author": "Kaden Gibbs",
